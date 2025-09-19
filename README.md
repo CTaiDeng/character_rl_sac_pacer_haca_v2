@@ -13,7 +13,7 @@ You can load the example document using standard Python file operations. The sni
 ```python
 from pathlib import Path
 
-example_path = Path("res/data/sample_article.txt")
+example_path = Path("data/sample_article.txt")
 text = example_path.read_text(encoding="utf-8")
 paragraphs = [segment.strip() for segment in text.split("\n\n") if segment.strip()]
 
