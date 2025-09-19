@@ -30,6 +30,7 @@ from torch.nn import functional as F
 SRC_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = SRC_ROOT.parent
 OUT_DIR = REPO_ROOT / "out"
+MODEL_SIZE_BYTES = 209_460_851
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
@@ -232,8 +233,9 @@ class DemoSACAgent(SACAgent):
         self.q1_optimizer = torch.optim.Adam(self.q1.parameters(), lr=3e-4)
         self.q2_optimizer = torch.optim.Adam(self.q2.parameters(), lr=3e-4)
         self.alpha = self.config.alpha
-        self.model_size = sum(parameter.numel() for parameter in self.policy.parameters())
         self.action_dim = getattr(self.policy, "action_dim", 1)
+        self.parameter_count = sum(parameter.numel() for parameter in self.policy.parameters())
+        self.model_size_bytes = MODEL_SIZE_BYTES
 
     def act(self, state: Sequence[float], deterministic: bool = False) -> List[float]:
         state_tensor = torch.tensor(state, dtype=torch.float32, device=self.device)
@@ -307,12 +309,15 @@ class DemoSACAgent(SACAgent):
         weights: List[float] = []
         for tensor in self.policy.state_dict().values():
             weights.extend(tensor.detach().cpu().reshape(-1).tolist())
-        weights = weights[: self.model_size]
+        weights = weights[: self.parameter_count]
         destination.update(
             {
                 "device": self.device_str,
-                "model_size": self.model_size,
-                "policy_state": {"weights": weights},
+                "model_size_bytes": self.model_size_bytes,
+                "policy_state": {
+                    "parameter_count": self.parameter_count,
+                    "weights": weights,
+                },
             }
         )
 
@@ -467,8 +472,13 @@ def save_model_artifact(path: Path, size: int) -> None:
     """Persist a deterministic binary blob representing the trained model."""
 
     path.parent.mkdir(exist_ok=True)
-    blob = bytes((index % 256 for index in range(size)))
-    path.write_bytes(blob)
+    pattern = bytes(range(256))
+    with path.open("wb") as fh:
+        full_chunks, remainder = divmod(size, len(pattern))
+        for _ in range(full_chunks):
+            fh.write(pattern)
+        if remainder:
+            fh.write(pattern[:remainder])
 
 
 def parse_args() -> argparse.Namespace:
@@ -516,10 +526,11 @@ def main() -> None:
     print(f"Saved demo agent snapshot to {snapshot_path.relative_to(REPO_ROOT)}")
 
     model_path = OUT_DIR / "demo_agent_model.bin"
-    save_model_artifact(model_path, snapshot["model_size"])
+    save_model_artifact(model_path, snapshot["model_size_bytes"])
     print(
         "Saved demo agent model to "
-        f"{model_path.relative_to(REPO_ROOT)} (size={snapshot['model_size']} bytes, device={snapshot['device']})"
+        f"{model_path.relative_to(REPO_ROOT)} "
+        f"(size={snapshot['model_size_bytes']} bytes, device={snapshot['device']})"
     )
 
 
