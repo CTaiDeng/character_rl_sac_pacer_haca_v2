@@ -13,24 +13,24 @@
 记字符词表大小为 $|\mathcal{V}|$，最大摘要长度为 $L_{max}$。策略网络 $\pi_\theta$ 包含如下层次：
 
 1. **嵌入层** $E \in \mathbb{R}^{|\mathcal{V}| \times d_{emb}}$：
-   \[
+   $$
    Z = E(x) \in \mathbb{R}^{T \times d_{emb}}, \quad T = |x|。
-   \]
+   $$
 2. **编码器 GRU** $\text{GRU}_{enc}$：
-   \[
+   $$
    h_t = \text{GRU}_{enc}(Z) \in \mathbb{R}^{d_{hid}}。
-   \]
+   $$
 3. **解码器 GRU** $\text{GRU}_{dec}$：以 $h_t$ 为初始隐藏状态，逐步生成输出：
-   \[
+   $$
    \begin{aligned}
    y_0 &= \texttt{<bos>}\\
    y_k, h_{k+1} &= \text{GRU}_{dec}(E(y_{k-1}), h_k),\quad k = 1,\ldots,L_{max}。
    \end{aligned}
-   \]
+   $$
 4. **输出投影** $W_o \in \mathbb{R}^{d_{hid} \times |\mathcal{V}|}$：
-   \[
+   $$
    p(y_k \mid y_{<k}, x) = \text{Softmax}(W_o h_k)。
-   \]
+   $$
 
 伪代码描述策略网络：
 ```pseudo
@@ -59,13 +59,13 @@ function POLICY_FORWARD(x_tokens):
 1. **共享嵌入层**：与策略网络一致的 $E$，分别编码状态 $x$ 与动作 $\hat{s}_t$。
 2. **掩码平均池化**：对填充后的序列取均值得到 $\bar{z}_x, \bar{z}_a \in \mathbb{R}^{d_{emb}}$。
 3. **线性变换**：
-   \[
+   $$
    u = \tanh(W_s \bar{z}_x), \quad v = \tanh(W_a \bar{z}_a)。
-   \]
+   $$
 4. **前馈头**：
-   \[
+   $$
    q = W_2 \sigma(W_1 [u; v])。
-   \]
+   $$
 
 伪代码如下：
 ```pseudo
