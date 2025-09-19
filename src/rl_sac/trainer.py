@@ -27,6 +27,7 @@ class TrainerConfig:
     warmup_steps: int = 1_000
     batch_size: int = 256
     updates_per_step: int = 1
+    updates_per_round: int = 0
 
 
 class Trainer:

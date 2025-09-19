@@ -9,7 +9,7 @@ abstract replay buffer interface. Concrete implementations can inherit from
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Protocol, Sequence
+from typing import Any, Iterable, List, Protocol
 
 
 @dataclass
@@ -24,10 +24,10 @@ class Transition:
         done: Boolean flag indicating whether the episode terminated.
     """
 
-    state: Sequence[float]
-    action: Sequence[float]
+    state: Any
+    action: Any
     reward: float
-    next_state: Sequence[float]
+    next_state: Any
     done: bool
 
 

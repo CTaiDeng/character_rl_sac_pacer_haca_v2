@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>训练指标可视化</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, shrink-to-fit=no"
+    />
+    <style>
+      body {
+        font-family: "Segoe UI", "Helvetica Neue", Arial, "PingFang SC", sans-serif;
+        margin: 2rem;
+        background: #f7f7f7;
+        color: #222;
+      }
+      h1 {
+        margin-bottom: 0.5rem;
+      }
+      p.description {
+        margin-top: 0;
+        color: #555;
+      }
+      .chart-wrapper {
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+      canvas {
+        max-width: 100%;
+      }
+      #status {
+        margin-bottom: 1rem;
+        color: #d9534f;
+      }
+      footer {
+        font-size: 0.85rem;
+        color: #666;
+        margin-top: 2rem;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  </head>
+  <body>
+    <h1>训练指标可视化仪表盘</h1>
+    <p class="description">
+      本页面会读取 <code>out/step_metrics.csv</code> 与
+      <code>out/round_metrics.csv</code>，并基于 Chart.js 绘制每个 Step 的
+      即时评分以及每轮训练的总得分折线图。运行 <code>train_demo</code>
+      后，通过静态服务器访问本页面，即可看到实时导出的 CSV 数据。
+    </p>
+    <div id="status"></div>
+    <div class="chart-wrapper">
+      <h2>Step 奖励走势</h2>
+      <canvas id="stepChart" height="320"></canvas>
+    </div>
+    <div class="chart-wrapper">
+      <h2>轮次总奖励走势</h2>
+      <canvas id="roundChart" height="320"></canvas>
+    </div>
+    <footer>
+      提示：直接双击 HTML 文件打开时，浏览器可能因安全策略拒绝读取 CSV。
+      推荐在项目根目录执行 <code>python -m http.server</code> 后，通过
+      <code>http://localhost:8000/visualizations/training_metrics.html</code>
+      访问。
+    </footer>
+    <script>
+      async function loadCsv(path) {
+        const response = await fetch(path, { cache: 'no-cache' });
+        if (!response.ok) {
+          throw new Error(`无法加载 ${path}: ${response.status}`);
+        }
+        const text = await response.text();
+        return parseCsv(text);
+      }
+
+      function parseCsv(text) {
+        const lines = text.trim().split(/\r?\n/);
+        if (lines.length === 0) {
+          return [];
+        }
+        const headers = lines.shift().split(',').map((item) => item.trim());
+        return lines
+          .filter((line) => line.trim().length > 0)
+          .map((line) => {
+            const cells = line.split(',');
+            const row = {};
+            headers.forEach((header, index) => {
+              row[header] = cells[index] !== undefined ? cells[index].trim() : '';
+            });
+            return row;
+          });
+      }
+
+      function toNumber(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+
+      function buildStepDataset(stepRows) {
+        const labels = stepRows.map((row) => toNumber(row.global_step));
+        const rewards = stepRows.map((row) => toNumber(row.reward));
+        return { labels, rewards };
+      }
+
+      function buildRoundDataset(roundRows) {
+        const labels = roundRows.map((row) => `Round ${row.round}`);
+        const totals = roundRows.map((row) => toNumber(row.total_reward));
+        return { labels, totals };
+      }
+
+      function renderStepChart(ctx, dataset) {
+        return new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: dataset.labels,
+            datasets: [
+              {
+                label: 'Step Reward',
+                data: dataset.rewards,
+                borderColor: '#007bff',
+                backgroundColor: 'rgba(0, 123, 255, 0.12)',
+                tension: 0.2,
+                fill: true,
+                pointRadius: 0,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+              x: {
+                title: { display: true, text: 'Global Step' },
+              },
+              y: {
+                title: { display: true, text: 'Reward' },
+              },
+            },
+          },
+        });
+      }
+
+      function renderRoundChart(ctx, dataset) {
+        return new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: dataset.labels,
+            datasets: [
+              {
+                label: 'Total Reward',
+                data: dataset.totals,
+                backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                borderColor: '#ff9f40',
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: {
+                title: { display: true, text: 'Round' },
+              },
+              y: {
+                title: { display: true, text: 'Total Reward' },
+              },
+            },
+          },
+        });
+      }
+
+      async function init() {
+        const status = document.getElementById('status');
+        try {
+          const [stepRows, roundRows] = await Promise.all([
+            loadCsv('../out/step_metrics.csv'),
+            loadCsv('../out/round_metrics.csv'),
+          ]);
+          if (stepRows.length === 0) {
+            status.textContent = 'CSV 文件为空，请先运行训练脚本生成数据。';
+            return;
+          }
+          status.textContent = '';
+          const stepDataset = buildStepDataset(stepRows);
+          const roundDataset = buildRoundDataset(roundRows);
+          const stepCtx = document.getElementById('stepChart').getContext('2d');
+          const roundCtx = document.getElementById('roundChart').getContext('2d');
+          renderStepChart(stepCtx, stepDataset);
+          if (roundRows.length > 0) {
+            renderRoundChart(roundCtx, roundDataset);
+          } else {
+            document.getElementById('roundChart').closest('.chart-wrapper').style.display = 'none';
+          }
+        } catch (error) {
+          status.textContent = `${error.message}。请确认 CSV 路径是否正确。`;
+          console.error(error);
+        }
+      }
+
+      document.addEventListener('DOMContentLoaded', init);
+    </script>
+  </body>
+</html>
