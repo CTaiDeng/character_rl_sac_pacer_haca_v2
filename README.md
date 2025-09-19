@@ -1,10 +1,16 @@
 # G008
 
-This repository hosts scaffolding for a Soft Actor-Critic (SAC) implementation located in `src/rl_sac`. The current code base provides class and function skeletons that describe the flow of data between replay buffers, policy/value networks, and training routines. A lightweight training demonstration is available to show how the components fit together when driven by synthetic data derived from the bundled example article.
+This repository hosts scaffolding for a Soft Actor-Critic (SAC) implementation located in `src/rl_sac`. The current code base provides class and function skeletons that describe the flow of data between replay buffers, policy/value networks, and training routines. A lightweight training demonstration is available to show how the components fit together when driven by synthetic data distilled from the bundled example article.
+
+## 开发协议（Development Protocol）
+
+* 演示脚本将策略网络视为**微型 LLM 头部**，通过 SAC 更新对示例文章进行知识蒸馏。
+* `data/sample_article.txt` 使用 `"[----------------------------------------------------->"` 作为段落分割符号，模拟教师模型输出来的分段提示。
+* 训练过程中对每个分割执行**迭代摘要**：第 1 个摘要默认为空字符串，将其与第 1 个分割（两个分隔符之间的内容）拼接后得到第 1 次输出；随后把该摘要与第 2 个分割组合生成第 2 次输出，如此迭代，模拟蒸馏时“上一次摘要 + 间隔内容 → 新摘要”的累积推理轨迹。
 
 ## Examples
 
-The `res/data/` directory contains sample textual material that mimics the structure of articles used throughout the project. For instance, `res/data/sample_article.txt` 提供了一篇多段落的中文示例文章，围绕状态表示、策略参数化以及评估流程等 SAC 概念展开，并补充了离线数据融合、超参数搜索与未来展望等段落。这些文字被刻意写得较长，以便验证分片处理与批量载入逻辑。这些 paragraphs are intended to be processed as independent chunks by downstream tooling.
+The `data/` directory contains sample textual material that mimics the structure of articles used throughout the project. For instance, `data/sample_article.txt` 提供了一篇多段落的中文示例文章，围绕状态表示、策略参数化以及评估流程等 SAC 概念展开，并补充了离线数据融合、超参数搜索与未来展望等段落。这些文字被刻意写得较长，以便验证分片处理与批量载入逻辑。文件通过 `"[----------------------------------------------------->"` 分隔段落，从而便于下游工具将其视作教师模型输出的逐段提示。
 
 ### Loading the sample article
 
@@ -15,25 +21,30 @@ from pathlib import Path
 
 example_path = Path("data/sample_article.txt")
 text = example_path.read_text(encoding="utf-8")
-paragraphs = [segment.strip() for segment in text.split("\n\n") if segment.strip()]
+intervals = [
+    interval.strip()
+    for interval in text.split("[----------------------------------------------------->")
+    if interval.strip()
+]
 
-for idx, paragraph in enumerate(paragraphs, start=1):
-    print(f"Paragraph {idx}: {paragraph[:60]}...")
+for idx, interval in enumerate(intervals, start=1):
+    print(f"Interval {idx}: {interval[:60]}...")
 ```
 
 This workflow mirrors the intended usage within data ingestion pipelines, ensuring that each section of the article can be independently tokenized or transformed before feeding into SAC-related training tasks.
 
 ## Demo training run
 
-The repository ships with a `train_demo.py` module under `src/` that wires together the replay buffer, agent, and trainer scaffolding using a toy environment constructed from the sample article statistics.
+The repository ships with a `train_demo.py` module under `src/` that wires together the replay buffer, agent, and trainer scaffolding using a toy environment constructed from the sample article statistics and iterative distillation summaries.
 
 ### Dependencies
 
-The demo only requires a Python interpreter (3.10 or newer) and does not depend on external libraries. Optionally create and activate a virtual environment before running the script:
+The demo requires Python 3.10+ and the CPU build of [PyTorch](https://pytorch.org/). Optionally create and activate a virtual environment before installing the dependencies and running the script:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
+pip install torch
 ```
 
 ### Running the demo
@@ -64,4 +75,4 @@ Actual numbers vary because the demo samples synthetic actions stochastically, b
 
 ### Saved artifacts
 
-After the log finishes, the script 序列化一个模型快照到 `out/demo_agent_snapshot.json`，其中包含演示代理的占位符状态与运行元数据（如训练步数、经验回放容量）。该文件会自动创建父目录 `out/`，便于在多阶段流程中复用或进一步加工演示产出的检查点。
+After the log finishes, the script 序列化一个模型快照到 `out/demo_agent_snapshot.json`，其中包含演示代理的占位符状态与运行元数据（如训练步数、经验回放容量）。该代理始终在 CPU 上训练，并生成 1024 个权重参数来模拟微型 LLM 头部的大小。与此同时，脚本还会在 `out/demo_agent_model.bin` 写出一个精确 1024 字节的二进制模型文件，便于后续流程验证保存逻辑。所有产物会自动创建父目录 `out/`，便于在多阶段流程中复用或进一步加工演示产出的检查点。
