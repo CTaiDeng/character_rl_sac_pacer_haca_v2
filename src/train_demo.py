@@ -609,6 +609,7 @@ class OperationParser:
             else:
                 results.append((command, payload))
 
+        return results
     @classmethod
     def _heuristic_link_payload(cls, payload: str) -> tuple[str, str]:
         stripped = payload.strip()
@@ -1678,15 +1679,12 @@ class ArticleEnvironment:
         capital_value = self._valuator.value(self._capital)
         potential_after = self._valuator.potential(self._capital)
         potential_gain = potential_after - potential_before
+        base_reward = (
+            capital_value
+            - self._cost_weight * self._cumulative_cost
+            - BUDGET_PENALTY_WEIGHT * budget_breach
+        )
         done = self._cursor + 1 >= len(self._chapters)
-        if done:
-            base_reward = (
-                    capital_value
-                    - self._cost_weight * self._cumulative_cost
-                    - BUDGET_PENALTY_WEIGHT * budget_breach
-                    - BUDGET_PENALTY_WEIGHT * budget_breach
-            )
-            base_reward = -BUDGET_PENALTY_WEIGHT * budget_breach
 
         similarity_score = metrics.get("similarity", 0.0)
         coverage_score = metrics.get("coverage_ratio", 0.0)
@@ -2400,9 +2398,9 @@ class DemoTrainer(Trainer):
                 block_color = ANSI_YELLOW
             reward_line = (
                 f"{metric_indent}reward={transition.reward:.3f} "
-                f"(base={metrics.get(reward_base, 0.0):+.3f}, "
-                f"potential={metrics.get(reward_potential_gain, 0.0):+.3f}, "
-                f"soft={metrics.get(reward_soft_bonus, 0.0):+.3f}; {reward_quality})"
+                f"(base={metrics.get('reward_base', 0.0):+.3f}, "
+                f"potential={metrics.get('reward_potential_gain', 0.0):+.3f}, "
+                f"soft={metrics.get('reward_soft_bonus', 0.0):+.3f}; {reward_quality})"
             )
 
             lines_to_print.append(summary_line)
