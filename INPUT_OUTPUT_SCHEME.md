@@ -14,7 +14,7 @@ $$
 ## 数据结构
 | 符号 | 含义 | 具体来源 |
 | --- | --- | --- |
-| $S_0$ | 初始摘要，置为空字符串 | 训练开始时环境重置 | 
+| $S_0$ | 初始摘要，置为空字符串 | 训练开始时环境重置 |
 | $C_t$ | 第 $t$ 章原文 | `load_article_features()` 读取 `data/sample_article.txt` 并按章节切分 |
 | $O_t$ | 观测对 | `TextObservation(previous_summary=S_{t-1}, chapter_text=C_t)` |
 | $A_t$ | 行动（模型输出） | `TextAction(text=S_t, token_ids, length)` |
@@ -24,7 +24,30 @@ $$
 `CharTokenizer` 在上述观测与行动上构造字符级序列：
 - 观测编码：`[BOS] + chars(S_{t-1}) + [SEP] + chars(C_t) + [EOS]`。
 - 行动编码：`[BOS] + chars(S_t) + [EOS]`。
-- 所有字符均基于 UTF-8 词表，并保留 `<unk>` 以处理未登录字符。
+- 汉字词表限定在 $\mathcal{V}_{\text{summary}}$（见下节），其余字符映射到 `<unk>` 以保持编码稳定。
+
+## 字符集约束与采样调节
+- 从 `data/sample_article.txt` 统计每个汉字的出现次数 $f(\chi)$，令 $\mu = \operatorname{mean}(f(\chi))$、$\sigma = \operatorname{pstdev}(f(\chi))$，抽取高频集合
+  $$\mathcal{V}_{\text{common}} = \{\chi \mid f(\chi) \ge \mu + \sigma\}$$
+  若集合为空，则回退到按频次排序的前 $200$ 个汉字。最终可用摘要字符集为
+  $$\mathcal{V}_{\text{summary}} = \mathcal{V}_{\text{common}} \cup \Pi$$
+  其中 $\Pi$ 为常用中英文标点集合。
+- 采样阶段根据 `WordComplianceChecker` 的双字库限制可选字符。记上一步生成的字符为 $p$，允许集合
+  $$\mathcal{A}(p) = \{\text{EOS}\} \cup \{\chi \in \mathcal{V}_{\text{summary}} \mid \text{checker.is_candidate_allowed}(p, \chi)\}$$
+  对于 $\mathcal{A}(p)$ 外的 token，将其对数几率减去固定惩罚 $\delta = 12$；若 $\lvert \mathcal{A}(p)\rvert < \lvert\mathcal{V}_{\text{summary}}\rvert + 1$，则对允许集合的 logits 以温度 $\tau = 0.85$ 进行缩放，使概率集中于合规片段。
+- 相关伪代码：
+```pseudo
+allowed <- {eos_id}
+for token_id in tokenizer.summary_token_ids:
+    char <- tokenizer.token_from_id(token_id)
+    if word_checker.is_candidate_allowed(prev_char, char):
+        allowed.add(token_id)
+mask <- ones_like(logits)
+mask[allowed] <- 0
+logits[mask == 1] -= 12
+if len(allowed) < len(tokenizer.summary_token_ids) + 1:
+    logits[allowed] /= 0.85
+```
 
 ## 迭代流程伪代码
 ```pseudo

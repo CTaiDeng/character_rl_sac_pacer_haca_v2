@@ -19,6 +19,7 @@ import subprocess
 import statistics
 import sys
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
@@ -126,6 +127,52 @@ LEXICAL_STATS_SUFFIX = "_lexical.json"
 LEXICAL_SIMILARITY_WEIGHT = 0.15
 LEXICAL_JS_WEIGHT = 0.1
 
+COMMON_SUMMARY_PUNCTUATION = {
+    '，',
+    '。',
+    '！',
+    '？',
+    '；',
+    '：',
+    '“',
+    '”',
+    '‘',
+    '’',
+    '（',
+    '）',
+    '《',
+    '》',
+    '、',
+    '·',
+    '—',
+    '–',
+    '…',
+    '【',
+    '】',
+    '『',
+    '』',
+    '「',
+    '」',
+    '<',
+    '>',
+    ',',
+    '.',
+    '!',
+    '?',
+    ';',
+    ':',
+    "'",
+    '"',
+    '-',
+    '(',
+    ')',
+    '[',
+    ']',
+    ' ',
+}
+DEFAULT_COMPLIANCE_TEMPERATURE = 0.85
+COMPLIANCE_INVALID_LOGIT_PENALTY = 12.0
+
 
 class TorchUnavailableError(RuntimeError):
     """Raised when a demo component requiring PyTorch is accessed without it."""
@@ -202,12 +249,27 @@ class CharTokenizer:
     SEP = "<sep>"
     UNK = "<unk>"
 
-    def __init__(self, texts: Sequence[str]) -> None:
+    def __init__(
+        self,
+        texts: Sequence[str],
+        *,
+        summary_charset: set[str] | None = None,
+        punctuation_whitelist: set[str] | None = None,
+    ) -> None:
         charset = set()
         for text in texts:
             charset.update(text)
         special_tokens = [self.PAD, self.BOS, self.EOS, self.SEP, self.UNK]
-        regular_tokens = sorted(ch for ch in charset if ch not in special_tokens)
+        punctuation_whitelist = punctuation_whitelist or set()
+        base_tokens: set[str] = set()
+        for char in charset:
+            if char in special_tokens:
+                continue
+            if _is_cjk(char) and summary_charset is not None and char not in summary_charset:
+                continue
+            base_tokens.add(char)
+        base_tokens.update(punctuation_whitelist)
+        regular_tokens = sorted(token for token in base_tokens if token not in special_tokens)
         self.vocab: List[str] = special_tokens + regular_tokens
         self.stoi = {token: idx for idx, token in enumerate(self.vocab)}
         self.itos = {idx: token for token, idx in self.stoi.items()}
@@ -216,6 +278,11 @@ class CharTokenizer:
             token for token in self.vocab if len(token) == 1 and token not in self.special_tokens
         }
         self._allowed_characters.update(CONTROL_CHAR_WHITELIST)
+        self._summary_token_ids = [
+            idx for idx, token in enumerate(self.vocab) if token not in self.special_tokens
+        ]
+        self._summary_charset = set(summary_charset or [])
+        self._punctuation_whitelist = set(punctuation_whitelist)
 
     @property
     def pad_id(self) -> int:
@@ -244,6 +311,13 @@ class CharTokenizer:
     @property
     def allowed_characters(self) -> set[str]:
         return set(self._allowed_characters)
+
+    def token_from_id(self, token_id: int) -> str:
+        return self.itos.get(token_id, "")
+
+    @property
+    def summary_token_ids(self) -> List[int]:
+        return list(self._summary_token_ids)
 
     def _encode_chars(self, text: str) -> List[int]:
         return [self.stoi.get(char, self.unk_id) for char in text]
@@ -298,6 +372,29 @@ def _is_cjk(char: str) -> bool:
     return 0x4E00 <= codepoint <= 0x9FFF
 
 
+def _compute_common_summary_charset(article_path: Path) -> set[str]:
+    """Derive high-frequency CJK characters from the sample article."""
+
+    try:
+        article_text = article_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return set()
+    cjk_counts = Counter(char for char in article_text if _is_cjk(char))
+    if not cjk_counts:
+        return set()
+    frequencies = list(cjk_counts.values())
+    mean = statistics.mean(frequencies)
+    stdev = statistics.pstdev(frequencies) if len(frequencies) > 1 else 0.0
+    threshold = mean + stdev
+    if threshold <= 0:
+        return set(cjk_counts.keys())
+    common = {char for char, count in cjk_counts.items() if count >= threshold}
+    if common:
+        return common
+    fallback = {char for char, _ in cjk_counts.most_common(200)}
+    return fallback
+
+
 class WordComplianceChecker:
     """Detect non-compliant Chinese bigrams to penalize garbled wording."""
 
@@ -321,6 +418,19 @@ class WordComplianceChecker:
         for idx in range(len(chars) - 1):
             bigram = chars[idx] + chars[idx + 1]
             self.allowed_bigrams.add(bigram)
+
+    def is_candidate_allowed(self, previous_char: str | None, candidate: str) -> bool:
+        """Return True if candidate can follow previous_char."""
+
+        if not candidate:
+            return False
+        if not _is_cjk(candidate):
+            return True
+        if candidate not in self.allowed_unigrams:
+            return False
+        if not previous_char or not _is_cjk(previous_char):
+            return True
+        return (previous_char + candidate) in self.allowed_bigrams
 
     def noncompliant_ratio(self, summary: str) -> float:
         """Return the ratio of Chinese characters not aligned with known words."""
@@ -1212,6 +1322,11 @@ class TextPolicyNetwork(nn.Module):
         max_summary_length: int,
         bos_token_id: int,
         eos_token_id: int,
+        *,
+        tokenizer: CharTokenizer | None = None,
+        word_checker: WordComplianceChecker | None = None,
+        compliance_temperature: float = DEFAULT_COMPLIANCE_TEMPERATURE,
+        invalid_logit_penalty: float = COMPLIANCE_INVALID_LOGIT_PENALTY,
     ) -> None:
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
@@ -1222,6 +1337,53 @@ class TextPolicyNetwork(nn.Module):
         self.vocab_size = vocab_size
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
+        self._tokenizer_ref = tokenizer
+        self._word_checker = word_checker
+        self._compliance_temperature = max(1e-4, compliance_temperature)
+        self._invalid_logit_penalty = abs(invalid_logit_penalty)
+
+    def _adjust_logits_with_compliance(
+        self,
+        logits: torch.Tensor,
+        prev_tokens: torch.Tensor,
+        finished: torch.Tensor,
+    ) -> torch.Tensor:
+        if self._word_checker is None or self._tokenizer_ref is None:
+            return logits
+        summary_token_ids = self._tokenizer_ref.summary_token_ids
+        if not summary_token_ids:
+            return logits
+        adjusted = logits.clone()
+        eos_id = self.eos_token_id
+        candidate_count = len(summary_token_ids) + 1
+        for batch_idx in range(logits.size(0)):
+            if finished[batch_idx]:
+                continue
+            prev_token_id = int(prev_tokens[batch_idx].item())
+            prev_char = self._tokenizer_ref.token_from_id(prev_token_id)
+            allowed_ids: set[int] = {eos_id}
+            for token_id in summary_token_ids:
+                candidate_char = self._tokenizer_ref.token_from_id(token_id)
+                if self._word_checker.is_candidate_allowed(prev_char, candidate_char):
+                    allowed_ids.add(token_id)
+            if not allowed_ids:
+                allowed_ids.add(eos_id)
+            mask = torch.ones_like(adjusted[batch_idx], dtype=torch.bool)
+            mask[list(allowed_ids)] = False
+            if not torch.any(mask).item():
+                continue
+            adjusted[batch_idx, mask] = adjusted[batch_idx, mask] - self._invalid_logit_penalty
+            if (
+                self._compliance_temperature < 1.0
+                and len(allowed_ids) < candidate_count
+            ):
+                allowed_tensor = torch.tensor(
+                    list(allowed_ids), dtype=torch.long, device=adjusted.device
+                )
+                adjusted[batch_idx, allowed_tensor] = (
+                    adjusted[batch_idx, allowed_tensor] / self._compliance_temperature
+                )
+        return adjusted
 
     def forward(
         self, tokens: torch.Tensor, lengths: torch.Tensor
@@ -1246,6 +1408,7 @@ class TextPolicyNetwork(nn.Module):
             prev_emb = self.embedding(prev_tokens).unsqueeze(1)
             decoder_out, hidden_state = self.decoder(prev_emb, hidden_state)
             logits = self.output_layer(decoder_out.squeeze(1))
+            logits = self._adjust_logits_with_compliance(logits, prev_tokens, finished)
             dist = Categorical(logits=logits)
             sampled = dist.sample()
             outputs.append(sampled)
@@ -1284,6 +1447,7 @@ class TextPolicyNetwork(nn.Module):
             prev_emb = self.embedding(prev_tokens).unsqueeze(1)
             decoder_out, hidden_state = self.decoder(prev_emb, hidden_state)
             logits = self.output_layer(decoder_out.squeeze(1))
+            logits = self._adjust_logits_with_compliance(logits, prev_tokens, finished)
             chosen = torch.argmax(logits, dim=-1)
             outputs.append(chosen)
             finished = finished | chosen.eq(self.eos_token_id)
@@ -1359,8 +1523,28 @@ class DemoNetworkFactory(NetworkFactory):
     max_summary_length: int
     bos_token_id: int
     eos_token_id: int
+    compliance_temperature: float = DEFAULT_COMPLIANCE_TEMPERATURE
+    invalid_logit_penalty: float = COMPLIANCE_INVALID_LOGIT_PENALTY
 
-    def build_policy(self, *args: Any, **kwargs: Any) -> TextPolicyNetwork:
+    def build_policy(
+        self,
+        *args: Any,
+        tokenizer: CharTokenizer | None = None,
+        word_checker: WordComplianceChecker | None = None,
+        compliance_temperature: float | None = None,
+        invalid_logit_penalty: float | None = None,
+        **kwargs: Any,
+    ) -> TextPolicyNetwork:
+        temperature = (
+            compliance_temperature
+            if compliance_temperature is not None
+            else self.compliance_temperature
+        )
+        penalty = (
+            invalid_logit_penalty
+            if invalid_logit_penalty is not None
+            else self.invalid_logit_penalty
+        )
         return TextPolicyNetwork(
             self.vocab_size,
             self.embedding_dim,
@@ -1368,6 +1552,10 @@ class DemoNetworkFactory(NetworkFactory):
             self.max_summary_length,
             self.bos_token_id,
             self.eos_token_id,
+            tokenizer=tokenizer,
+            word_checker=word_checker,
+            compliance_temperature=temperature,
+            invalid_logit_penalty=penalty,
         )
 
     def build_q_functions(
@@ -1574,10 +1762,13 @@ class DemoSACAgent(SACAgent):
         config: AgentConfig,
         *,
         tokenizer: CharTokenizer,
+        word_checker: WordComplianceChecker | None = None,
         update_batch_size: int = 4,
         device: str = "cpu",
     ) -> "DemoSACAgent":
-        policy = factory.build_policy()
+        policy = factory.build_policy(
+            tokenizer=tokenizer, word_checker=word_checker
+        )
         q1, q2 = factory.build_q_functions()
         target_q1, target_q2 = factory.build_q_functions()
         return cls(
@@ -1857,7 +2048,12 @@ def build_demo_components(
     else:
         observations = list(precomputed)
     chapters = [ob.chapter_text for ob in observations]
-    tokenizer = CharTokenizer(chapters)
+    common_charset = _compute_common_summary_charset(article_path)
+    tokenizer = CharTokenizer(
+        chapters,
+        summary_charset=common_charset or None,
+        punctuation_whitelist=COMMON_SUMMARY_PUNCTUATION,
+    )
     if lexical_stats is None or lexical_tokenizer is None:
         fallback_stats, fallback_tokenizer = _load_lexical_statistics(article_path)
         lexical_stats = lexical_stats or fallback_stats
@@ -1880,6 +2076,8 @@ def build_demo_components(
         max_summary_length=max_summary_length,
         bos_token_id=tokenizer.bos_id,
         eos_token_id=tokenizer.eos_id,
+        compliance_temperature=DEFAULT_COMPLIANCE_TEMPERATURE,
+        invalid_logit_penalty=COMPLIANCE_INVALID_LOGIT_PENALTY,
     )
     agent_config = AgentConfig()
     agent = DemoSACAgent.from_factory(
@@ -1887,6 +2085,7 @@ def build_demo_components(
         replay_buffer,
         agent_config,
         tokenizer=tokenizer,
+        word_checker=environment.word_checker,
         update_batch_size=1,
         device='cpu',
     )
