@@ -34,7 +34,7 @@ from torch.distributions import Categorical
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 
-SRC_ROOT = Path(__file__).resolve().parent
+from lexical_stats import (\n    ChapterLexicalStatistics,\n    LexicalTokenizer,\n    TokenizerUnavailableError,\n    cosine_similarity,\n    jensen_shannon_similarity,\n)\n\nSRC_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = SRC_ROOT.parent
 OUT_DIR = REPO_ROOT / "out"
 STEP_CSV_PATH = OUT_DIR / "step_metrics.csv"
@@ -60,6 +60,9 @@ STEP_CSV_HEADERS = [
     "unk_char_ratio",
     "disallowed_char_ratio",
     "control_char_ratio",
+    "lexical_cosine",
+    "lexical_js_similarity",
+    "lexical_token_count",
 ]
 
 ROUND_CSV_HEADERS = [
@@ -85,6 +88,10 @@ QUALITY_NOVELTY_WEIGHT = 0.1
 GARBLED_PENALTY_WEIGHT = 0.5
 WORD_NONCOMPLIANCE_WEIGHT = 0.7
 CONTROL_CHAR_WHITELIST = {"\n", "\r", "\t"}
+
+LEXICAL_STATS_SUFFIX = "_lexical.json"
+LEXICAL_SIMILARITY_WEIGHT = 0.15
+LEXICAL_JS_WEIGHT = 0.1
 
 
 @dataclass
@@ -346,6 +353,9 @@ def analyze_summary(
     tokenizer: CharTokenizer | None = None,
     word_checker: WordComplianceChecker | None = None,
     chapter_text: str | None = None,
+    chapter_index: int | None = None,
+    lexical_stats: ChapterLexicalStatistics | None = None,
+    lexical_tokenizer: LexicalTokenizer | None = None,
 ) -> MutableMapping[str, float]:
     """Compute quality statistics for the provided summary."""
 
@@ -372,6 +382,25 @@ def analyze_summary(
             disallowed_ratio,
             control_ratio,
         ) = _compute_garbled_statistics(summary, tokenizer)
+    lexical_cosine = 0.0
+    lexical_js_similarity = 0.0
+    lexical_token_count = 0
+    if (
+        lexical_stats is not None
+        and lexical_tokenizer is not None
+        and chapter_index is not None
+    ):
+        try:
+            chapter_entry = lexical_stats.chapter_by_index(chapter_index)
+        except KeyError:
+            pass
+        else:
+            summary_vector = lexical_stats.vectorize_text(summary, lexical_tokenizer)
+            lexical_token_count = summary_vector.token_count
+            lexical_cosine = cosine_similarity(summary_vector.tfidf, chapter_entry.tfidf)
+            lexical_js_similarity = jensen_shannon_similarity(
+                summary_vector.probability, chapter_entry.probability
+            )
     if word_checker is not None:
         word_noncompliance_ratio = word_checker.noncompliant_ratio(summary)
     metrics: MutableMapping[str, float] = {
@@ -389,6 +418,9 @@ def analyze_summary(
         "unk_char_ratio": float(unk_char_ratio),
         "disallowed_char_ratio": float(disallowed_ratio),
         "control_char_ratio": float(control_ratio),
+        "lexical_cosine": float(lexical_cosine),
+        "lexical_js_similarity": float(lexical_js_similarity),
+        "lexical_token_count": float(lexical_token_count),
     }
     if chapter_text is not None:
         metrics["chapter_length"] = float(len(chapter_text))
@@ -413,7 +445,14 @@ def load_article_features(path: Path) -> List[TextObservation]:
 class ArticleEnvironment:
     """Environment emitting text observations and accepting text actions."""
 
-    def __init__(self, chapters: Sequence[str], *, tokenizer: CharTokenizer) -> None:
+    def __init__(
+        self,
+        chapters: Sequence[str],
+        *,
+        tokenizer: CharTokenizer,
+        lexical_statistics: ChapterLexicalStatistics | None = None,
+        lexical_tokenizer: LexicalTokenizer | None = None,
+    ) -> None:
         if not chapters:
             raise ValueError("The environment requires at least one chapter.")
         self._chapters = list(chapters)
@@ -422,6 +461,19 @@ class ArticleEnvironment:
         self._last_metrics: MutableMapping[str, float] = {}
         self._tokenizer = tokenizer
         self._word_checker = WordComplianceChecker(self._chapters)
+        self._lexical_statistics = lexical_statistics
+        if self._lexical_statistics is not None and lexical_tokenizer is None:
+            try:
+                lexical_tokenizer = LexicalTokenizer(
+                    stopwords=self._lexical_statistics.stopwords,
+                    force_backend=self._lexical_statistics.tokenizer_backend,
+                )
+            except TokenizerUnavailableError:
+                lexical_tokenizer = LexicalTokenizer(
+                    stopwords=self._lexical_statistics.stopwords,
+                    force_backend="regex",
+                )
+        self._lexical_tokenizer = lexical_tokenizer
 
     def reset(self) -> TextObservation:
         self._cursor = 0
@@ -488,6 +540,14 @@ class ArticleEnvironment:
     @property
     def word_checker(self) -> WordComplianceChecker:
         return self._word_checker
+
+    @property
+    def lexical_statistics(self) -> ChapterLexicalStatistics | None:
+        return self._lexical_statistics
+
+    @property
+    def lexical_tokenizer(self) -> LexicalTokenizer | None:
+        return self._lexical_tokenizer
 
 
 class SimpleReplayBuffer(BaseReplayBuffer):
@@ -1271,3 +1331,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
