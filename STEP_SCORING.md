@@ -7,12 +7,14 @@
 - **相似度 $\mathrm{sim}(s, x)$**：使用 `difflib.SequenceMatcher` 的 `ratio()` 作为字符序列的全局相似度。
 - **覆盖率 $\mathrm{cov}(s, x)$**：统计匹配块的字符总数与源文本总字符数之比，衡量摘要对“上一轮摘要 + 当前章节”组合信息的涵盖程度。
 - **复制率 $\mathrm{copy}(s, x)$**：取最长匹配块长度与摘要总长度之比，表示摘要中最大连续片段对源文本的直接复制程度；新颖度定义为 $\mathrm{nov}(s, x) = \max(0, 1 - \mathrm{copy}(s, x))$。
+- **词向量余弦相似度 $\mathrm{lex\_cos}(s, c)$**：基于章节 TF-IDF 向量与摘要 TF-IDF 向量的余弦相似度，衡量摘要是否覆盖高权重词语。
+- **词频分布相似度 $\mathrm{lex\_js}(s, c)$**：使用 Jensen-Shannon 相似度比较摘要与章节的概率分布，反映整体词频结构匹配度。
 - **乱码比例 $\mathrm{garb}(s)$**：统计摘要中 `<unk>`、不可打印字符以及不在 `CharTokenizer` 字符集内的字符占比。计算时会将 `<unk>` 子串整体视作乱码，并排除换行、制表符等允许的控制字符。
 - **词合规缺失率 $\mathrm{word\_nc}(s)$**：基于全部章节提取连续汉字 bigram 构成的词表，统计摘要中任一未出现过的汉字 bigram 或全新汉字占摘要全部汉字的比例，用于识别被随意拼接的词语或语序混乱的组合。
 
 最终奖励 $R(s, x)$ 将上述质量项与乱码惩罚结合：
 \[
-R(s, x) = 0.6 \cdot \mathrm{sim}(s, x) + 0.3 \cdot \mathrm{cov}(s, x) + 0.1 \cdot \mathrm{nov}(s, x) - 0.5 \cdot \mathrm{garb}(s) - 0.7 \cdot \mathrm{word\_nc}(s).
+R(s, x) = 0.6 \cdot \mathrm{sim}(s, x) + 0.3 \cdot \mathrm{cov}(s, x) + 0.1 \cdot \mathrm{nov}(s, x) + 0.15 \cdot \mathrm{lex\_cos}(s, c) + 0.1 \cdot \mathrm{lex\_js}(s, c) - 0.5 \cdot \mathrm{garb}(s) - 0.7 \cdot \mathrm{word\_nc}(s).
 \]
 
 前三个正向权重反映了我们优先追求整体语义相似和信息覆盖，同时对保持一定的新颖度给予次要奖励；两个负号项则针对编码质量与汉字组合进行约束：只要摘要里含有乱码或词语组合未在原文中出现，就会按照比例扣分，以此鼓励策略输出干净、语义连贯的中文句子。
@@ -20,7 +22,7 @@ R(s, x) = 0.6 \cdot \mathrm{sim}(s, x) + 0.3 \cdot \mathrm{cov}(s, x) + 0.1 \cdo
 ## 伪代码
 
 ```pseudo
-function compute_step_reward(summary_text, previous_summary, chapter_text, tokenizer, word_checker):
+function compute_step_reward(summary_text, previous_summary, chapter_text, chapter_index, tokenizer, word_checker, lexical_stats, lexical_tokenizer):
     source_text = concatenate(previous_summary, "\n", chapter_text)  # 若任一为空则直接使用另一个
     matcher = SequenceMatcher(summary_text, source_text)
     similarity = matcher.ratio()
@@ -47,10 +49,15 @@ function compute_step_reward(summary_text, previous_summary, chapter_text, token
     garbled_ratio = compute_garbled_ratio(summary_text, tokenizer)
     word_nc_ratio = compute_word_noncompliance_ratio(summary_text, word_checker)
 
+    lexical_cosine = compute_lexical_cosine(summary_text, chapter_index, lexical_stats, lexical_tokenizer)
+    lexical_js = compute_lexical_js(summary_text, chapter_index, lexical_stats, lexical_tokenizer)
+
     reward = (
         0.6 * similarity
         + 0.3 * coverage
         + 0.1 * novelty
+        + 0.15 * lexical_cosine
+        + 0.1 * lexical_js
         - 0.5 * garbled_ratio
         - 0.7 * word_nc_ratio
     )
@@ -60,7 +67,9 @@ function compute_step_reward(summary_text, previous_summary, chapter_text, token
         "copy_ratio": copy_ratio,
         "novelty_ratio": novelty,
         "garbled_ratio": garbled_ratio,
-        "word_noncompliance_ratio": word_nc_ratio
+        "word_noncompliance_ratio": word_nc_ratio,
+        "lexical_cosine": lexical_cosine,
+        "lexical_js": lexical_js
     }
 ```
 

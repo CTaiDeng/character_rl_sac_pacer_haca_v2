@@ -14,6 +14,7 @@ import csv
 import difflib
 import json
 import random
+import subprocess
 import statistics
 import sys
 import unicodedata
@@ -34,9 +35,18 @@ from torch.distributions import Categorical
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 
-from lexical_stats import (\n    ChapterLexicalStatistics,\n    LexicalTokenizer,\n    TokenizerUnavailableError,\n    cosine_similarity,\n    jensen_shannon_similarity,\n)\n\nSRC_ROOT = Path(__file__).resolve().parent
+from lexical_stats import (
+    ChapterLexicalStatistics,
+    LexicalTokenizer,
+    TokenizerUnavailableError,
+    cosine_similarity,
+    jensen_shannon_similarity,
+)
+
+SRC_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = SRC_ROOT.parent
 OUT_DIR = REPO_ROOT / "out"
+COMPUTE_TFIDF_SCRIPT = REPO_ROOT / "scripts" / "compute_chapter_tfidf.py"
 STEP_CSV_PATH = OUT_DIR / "step_metrics.csv"
 ROUND_CSV_PATH = OUT_DIR / "round_metrics.csv"
 
@@ -442,6 +452,143 @@ def load_article_features(path: Path) -> List[TextObservation]:
     return observations
 
 
+def _resolve_lexical_stats_path(article_path: Path) -> Path | None:
+    stats_filename = f"{article_path.stem}{LEXICAL_STATS_SUFFIX}"
+    candidates = [
+        article_path.with_name(stats_filename),
+        article_path.parent / stats_filename,
+        REPO_ROOT / "data" / stats_filename,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _load_lexical_statistics_from_path(
+    stats_path: Path,
+) -> tuple[ChapterLexicalStatistics, LexicalTokenizer]:
+    stats = ChapterLexicalStatistics.load(stats_path)
+    try:
+        tokenizer = LexicalTokenizer(
+            stopwords=stats.stopwords,
+            force_backend=stats.tokenizer_backend,
+        )
+    except TokenizerUnavailableError:
+        print("无法使用缓存中的分词后端，回退至正则切分。请确保已安装 jieba 以获得一致的奖励评估。")
+        tokenizer = LexicalTokenizer(
+            stopwords=stats.stopwords,
+            force_backend='regex',
+        )
+    return stats, tokenizer
+
+
+def _load_lexical_statistics(
+    article_path: Path,
+) -> tuple[ChapterLexicalStatistics | None, LexicalTokenizer | None]:
+    stats_path = _resolve_lexical_stats_path(article_path)
+    if stats_path is None:
+        return None, None
+    return _load_lexical_statistics_from_path(stats_path)
+
+
+def _ensure_lexical_statistics(
+    article_path: Path,
+    *,
+    recompute: bool = False,
+) -> tuple[ChapterLexicalStatistics | None, LexicalTokenizer | None]:
+    stats_path = _resolve_lexical_stats_path(article_path)
+    output_path = article_path.parent / f"{article_path.stem}{LEXICAL_STATS_SUFFIX}"
+    if stats_path is None and output_path.exists():
+        stats_path = output_path
+    needs_compute = recompute or stats_path is None
+    if not needs_compute and stats_path is not None:
+        try:
+            needs_compute = stats_path.stat().st_mtime < article_path.stat().st_mtime
+        except OSError:
+            needs_compute = True
+        else:
+            if not needs_compute:
+                try:
+                    relative = stats_path.relative_to(REPO_ROOT)
+                except ValueError:
+                    relative = stats_path
+                print(f"检测到现有词频缓存：{relative}")
+    if needs_compute:
+        if not COMPUTE_TFIDF_SCRIPT.exists():
+            try:
+                rel_script = COMPUTE_TFIDF_SCRIPT.relative_to(REPO_ROOT)
+            except ValueError:
+                rel_script = COMPUTE_TFIDF_SCRIPT
+            print(f"警告：未找到 {rel_script}，无法自动生成词频缓存。")
+        else:
+            cmd = [
+                sys.executable,
+                str(COMPUTE_TFIDF_SCRIPT),
+                '--article-path',
+                str(article_path),
+                '--output',
+                str(output_path),
+            ]
+            print('自动执行词频缓存生成：' + ' '.join(str(arg) for arg in cmd))
+            try:
+                subprocess.run(cmd, check=True)
+            except subprocess.CalledProcessError as exc:
+                print(
+                    f"词频缓存生成失败（退出码 {exc.returncode}），将继续尝试使用现有缓存。"
+                )
+            else:
+                stats_path = output_path
+    if stats_path is not None and stats_path.exists():
+        return _load_lexical_statistics_from_path(stats_path)
+    return _load_lexical_statistics(article_path)
+
+
+def _run_inline_lexical_evaluation(
+    lexical_stats: ChapterLexicalStatistics | None,
+    lexical_tokenizer: LexicalTokenizer | None,
+    chapter_index: int,
+    summary_paths: Sequence[Path],
+) -> None:
+    if lexical_stats is None or lexical_tokenizer is None:
+        print('警告：缺少词频缓存，跳过词频指标评估。')
+        return
+    chapter_entry = lexical_stats.chapter_by_index(chapter_index)
+    top_tfidf = sorted(
+        chapter_entry.tfidf.items(), key=lambda kv: kv[1], reverse=True
+    )[:5]
+
+    def _fmt(items: Sequence[tuple[str, float]]) -> str:
+        if not items:
+            return '<none>'
+        return ', '.join(f'{token}:{score:.3f}' for token, score in items)
+
+    print(
+        f"词频参考 | 章节 {chapter_index:02d} tokens={chapter_entry.token_count} "
+        f"top_tfidf={_fmt(top_tfidf)}"
+    )
+    for summary_path in summary_paths:
+        try:
+            summary_text = summary_path.read_text(encoding='utf-8')
+        except OSError as exc:
+            print(f"  摘要 {summary_path} 读取失败：{exc}，跳过。")
+            continue
+        vector = lexical_stats.vectorize_text(summary_text, lexical_tokenizer)
+        cosine = cosine_similarity(vector.tfidf, chapter_entry.tfidf)
+        js = jensen_shannon_similarity(
+            vector.probability, chapter_entry.probability
+        )
+        summary_top = sorted(
+            vector.tfidf.items(), key=lambda kv: kv[1], reverse=True
+        )[:5]
+        print('-' * 60)
+        print(
+            f"摘要 {summary_path} | tokens={vector.token_count} "
+            f"cosine={cosine:.4f} js={js:.4f}"
+        )
+        print('  top_tfidf=' + _fmt(summary_top))
+
+
 class ArticleEnvironment:
     """Environment emitting text observations and accepting text actions."""
 
@@ -496,11 +643,16 @@ class ArticleEnvironment:
             tokenizer=self._tokenizer,
             word_checker=self._word_checker,
             chapter_text=state.chapter_text,
+            chapter_index=state.step_index,
+            lexical_stats=self._lexical_statistics,
+            lexical_tokenizer=self._lexical_tokenizer,
         )
         reward = (
             QUALITY_SIMILARITY_WEIGHT * metrics["similarity"]
             + QUALITY_COVERAGE_WEIGHT * metrics["coverage_ratio"]
             + QUALITY_NOVELTY_WEIGHT * metrics["novelty_ratio"]
+            + LEXICAL_SIMILARITY_WEIGHT * metrics["lexical_cosine"]
+            + LEXICAL_JS_WEIGHT * metrics["lexical_js_similarity"]
             - GARBLED_PENALTY_WEIGHT * metrics["garbled_penalty"]
             - WORD_NONCOMPLIANCE_WEIGHT * metrics["word_penalty"]
         )
@@ -1024,6 +1176,9 @@ class DemoTrainer(Trainer):
                 "unk_char_ratio": metrics.get("unk_char_ratio", 0.0),
                 "disallowed_char_ratio": metrics.get("disallowed_char_ratio", 0.0),
                 "control_char_ratio": metrics.get("control_char_ratio", 0.0),
+                "lexical_cosine": metrics.get("lexical_cosine", 0.0),
+                "lexical_js_similarity": metrics.get("lexical_js_similarity", 0.0),
+                "lexical_token_count": metrics.get("lexical_token_count", 0.0),
             }
             print(
                 f"           -> summary={summary_len:04d} chars \"{summary_preview}\" "
@@ -1031,6 +1186,8 @@ class DemoTrainer(Trainer):
                 f"sim={log_metrics['similarity']:.3f} "
                 f"coverage={log_metrics['coverage_ratio']:.3f} "
                 f"novelty={log_metrics['novelty_ratio']:.3f} "
+                f"lex_cos={log_metrics['lexical_cosine']:.3f} "
+                f"lex_js={log_metrics['lexical_js_similarity']:.3f} "
                 f"garbled={log_metrics['garbled_ratio']:.3f} "
                 f"word_nc={log_metrics['word_noncompliance_ratio']:.3f} "
                 f"penalties={log_metrics['garbled_penalty']:.3f}/{log_metrics['word_penalty']:.3f} "
@@ -1058,6 +1215,9 @@ class DemoTrainer(Trainer):
                 "unk_char_ratio": log_metrics.get("unk_char_ratio", 0.0),
                 "disallowed_char_ratio": log_metrics.get("disallowed_char_ratio", 0.0),
                 "control_char_ratio": log_metrics.get("control_char_ratio", 0.0),
+                "lexical_cosine": log_metrics.get("lexical_cosine", 0.0),
+                "lexical_js_similarity": log_metrics.get("lexical_js_similarity", 0.0),
+                "lexical_token_count": log_metrics.get("lexical_token_count", 0.0),
             }
             _append_csv_row(STEP_CSV_PATH, STEP_CSV_HEADERS, step_csv_row)
             state = transition.next_state
@@ -1133,17 +1293,22 @@ class DemoTrainer(Trainer):
                 tokenizer=self.agent.tokenizer,
                 word_checker=self.environment.word_checker,
                 chapter_text=chapter,
+                chapter_index=idx,
+                lexical_stats=self.environment.lexical_statistics,
+                lexical_tokenizer=self.environment.lexical_tokenizer,
             )
             aggregated_summary = action.text
             summary_len, preview = _format_text_debug(action.text, 32, 32)
             rendered_iterations.append(
                 f"Iteration {idx:02d} | chars={summary_len:04d} "
-                f"sim≈{metrics['similarity']:.2f} "
-                f"coverage≈{metrics['coverage_ratio']:.2f} "
-                f"novelty≈{metrics['novelty_ratio']:.2f} "
-                f"garbled≈{metrics['garbled_ratio']:.2f} "
-                f"word_nc≈{metrics['word_noncompliance_ratio']:.2f} "
-                f"penalties≈{metrics['garbled_penalty']:.2f}/{metrics['word_penalty']:.2f} | {preview}"
+                f"sim={metrics['similarity']:.2f} "
+                f"coverage={metrics['coverage_ratio']:.2f} "
+                f"novelty={metrics['novelty_ratio']:.2f} "
+                f"lex_cos={metrics['lexical_cosine']:.2f} "
+                f"lex_js={metrics['lexical_js_similarity']:.2f} "
+                f"garbled={metrics['garbled_ratio']:.2f} "
+                f"word_nc={metrics['word_noncompliance_ratio']:.2f} "
+                f"penalties={metrics['garbled_penalty']:.2f}/{metrics['word_penalty']:.2f} | {preview}"
             )
         return rendered_iterations
 
@@ -1161,6 +1326,8 @@ def build_demo_components(
     capacity: int,
     *,
     precomputed: Sequence[TextObservation] | None = None,
+    lexical_stats: ChapterLexicalStatistics | None = None,
+    lexical_tokenizer: LexicalTokenizer | None = None,
 ) -> tuple[DemoSACAgent, DemoTrainer]:
     if precomputed is None:
         observations = load_article_features(article_path)
@@ -1168,8 +1335,20 @@ def build_demo_components(
         observations = list(precomputed)
     chapters = [ob.chapter_text for ob in observations]
     tokenizer = CharTokenizer(chapters)
+    if lexical_stats is None or lexical_tokenizer is None:
+        fallback_stats, fallback_tokenizer = _load_lexical_statistics(article_path)
+        lexical_stats = lexical_stats or fallback_stats
+        lexical_tokenizer = lexical_tokenizer or fallback_tokenizer
+        if lexical_stats is None:
+            stats_name = f"{article_path.stem}{LEXICAL_STATS_SUFFIX}"
+            print(f"警告：未找到 {stats_name}，词频奖励将被禁用。")
     max_summary_length = max(64, min(512, max(len(chapter) for chapter in chapters)))
-    environment = ArticleEnvironment(chapters, tokenizer=tokenizer)
+    environment = ArticleEnvironment(
+        chapters,
+        tokenizer=tokenizer,
+        lexical_statistics=lexical_stats,
+        lexical_tokenizer=lexical_tokenizer,
+    )
     replay_buffer = SimpleReplayBuffer(capacity)
     network_factory = DemoNetworkFactory(
         vocab_size=tokenizer.vocab_size,
@@ -1186,7 +1365,7 @@ def build_demo_components(
         agent_config,
         tokenizer=tokenizer,
         update_batch_size=1,
-        device="cpu",
+        device='cpu',
     )
     steps_per_round = len(chapters)
     trainer_config = TrainerConfig(
@@ -1250,12 +1429,33 @@ def parse_args() -> argparse.Namespace:
             "Useful for quick smoke tests when the full 76-step run is unnecessary."
         ),
     )
+    parser.add_argument(
+        "--recompute-lexical-cache",
+        action="store_true",
+        help="Force regeneration of the lexical TF-IDF cache before training.",
+    )
+    parser.add_argument(
+        "--lexical-eval-chapter",
+        type=int,
+        default=None,
+        help="If provided, run lexical similarity diagnostics for the given chapter before training.",
+    )
+    parser.add_argument(
+        "--lexical-eval-summaries",
+        type=Path,
+        nargs="*",
+        default=(),
+        help="One or more summary files used with --lexical-eval-chapter to inspect lexical metrics.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     article_path = REPO_ROOT / "data" / "sample_article.txt"
+    lexical_stats, lexical_tokenizer = _ensure_lexical_statistics(
+        article_path, recompute=args.recompute_lexical_cache
+    )
     observations = load_article_features(article_path)
     if args.max_chapters is not None:
         if args.max_chapters <= 0:
@@ -1264,6 +1464,15 @@ def main() -> None:
         if not observations:
             raise ValueError("No chapters available after applying --max-chapters filter.")
     chapters = [ob.chapter_text for ob in observations]
+    if args.lexical_eval_summaries:
+        if args.lexical_eval_chapter is None:
+            raise ValueError("--lexical-eval-summaries requires --lexical-eval-chapter")
+        _run_inline_lexical_evaluation(
+            lexical_stats,
+            lexical_tokenizer,
+            args.lexical_eval_chapter,
+            list(args.lexical_eval_summaries),
+        )
     article_text = article_path.read_text(encoding="utf-8")
     total_length, preview = _format_text_debug(article_text, 40, 40)
     print(
@@ -1282,6 +1491,8 @@ def main() -> None:
         article_path,
         args.replay_capacity,
         precomputed=observations,
+        lexical_stats=lexical_stats,
+        lexical_tokenizer=lexical_tokenizer,
     )
     if args.post_round_updates is not None:
         trainer.config.updates_per_round = max(0, args.post_round_updates)
@@ -1331,4 +1542,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 

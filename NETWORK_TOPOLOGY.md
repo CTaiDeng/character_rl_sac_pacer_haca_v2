@@ -8,6 +8,7 @@
   2. 编码器 GRU，提取观察序列的全局语境向量 $h_t$。
   3. 解码器 GRU，自回归地产生摘要字符分布。
   4. 双路 Q 网络，对 $(x, \hat{s}_t)$ 的价值进行评估，用于 SAC 的软价值更新。
+  5. 词频统计缓存单元：离线载入 $\mathcal{L}$，为奖励评估提供章节 TF-IDF 与词频分布向量。
 
 ## 策略网络拓扑
 记字符词表大小为 $|\mathcal{V}|$，最大摘要长度为 $L_{max}$。策略网络 $\pi_\theta$ 包含如下层次：
@@ -84,3 +85,9 @@ function Q_FORWARD(state_tokens, action_tokens):
 - 价值更新：$Q_\phi(x, \hat{s}_t)$、$Q_{\psi}(x, \hat{s}_t)$ 共享相同的嵌入与池化结构，实现软演员-评论家循环。
 
 当网络拓扑结构设计方案发生任何调整（例如更换编码器类型、修改解码器深度或价值网络结构），须同步更新本文件与相关输出数据方案文档，确保描述与实现保持一致。
+
+
+## 词频奖励支路
+- 通过 `scripts/compute_chapter_tfidf.py` 预处理 `data/sample_article.txt`，生成 `data/sample_article_lexical.json`，其中保存每章 TF-IDF、概率分布及 IDF。
+- 训练时一次载入 $\mathcal{L}$ 与对应的分词器，使 `analyze_summary` 能计算 `lexical_cosine` 与 `lexical_js` 两项指标。
+- 词频相似度被线性加权注入奖励：$0.15\cdot\mathrm{lex\_cos}+0.1\cdot\mathrm{lex\_js}$，既鼓励覆盖关键信息，又保持整体词频结构稳定。
