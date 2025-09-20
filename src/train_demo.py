@@ -13,6 +13,7 @@ import argparse
 import csv
 import difflib
 import json
+import math
 import random
 import subprocess
 import statistics
@@ -288,6 +289,121 @@ def _format_text_debug(text: str, head: int = 10, tail: int = 10) -> Tuple[int, 
     else:
         preview = f"{text[:head]}...{text[-tail:]}"
     return length, preview
+
+
+def _describe_metric_quality(key: str, value: float) -> str:
+    """Return a qualitative assessment for a scalar diagnostic metric."""
+
+    if math.isnan(value):
+        return "本次指标缺失，无法评估"
+
+    if key == "length_ratio":
+        if value < 0.10:
+            return "本次严重偏低，摘要几乎无法覆盖章节要点"
+        if value < 0.15:
+            return "本次明显偏低，需要显著扩展摘要"
+        if value < 0.25:
+            return "本次偏低，接近建议范围下限"
+        if value <= 0.40:
+            return "本次处于推荐范围内"
+        return "本次偏高，摘要可能略显冗长"
+    if key == "similarity":
+        if value < 0.10:
+            return "本次几乎没有贴合原文"
+        if value < 0.30:
+            return "本次贴合度偏低"
+        if value < 0.60:
+            return "本次贴合度一般"
+        if value < 0.80:
+            return "本次贴合度较好"
+        return "本次高度贴近原文"
+    if key == "coverage_ratio":
+        if value < 0.10:
+            return "本次覆盖率极低，遗漏大量信息"
+        if value < 0.30:
+            return "本次覆盖率偏低，需补充要点"
+        if value < 0.60:
+            return "本次覆盖率中等"
+        if value < 0.80:
+            return "本次覆盖率良好"
+        return "本次覆盖率接近完整"
+    if key == "novelty_ratio":
+        if value < 0.20:
+            return "本次几乎完全复述原文"
+        if value < 0.40:
+            return "本次新意较少"
+        if value < 0.70:
+            return "本次改写幅度适中"
+        if value < 0.90:
+            return "本次改写幅度较大"
+        return "本次新意极高，需确认信息是否充分"
+    if key == "lexical_cosine":
+        if value < 0.05:
+            return "本次关键词匹配几乎缺失"
+        if value < 0.15:
+            return "本次关键词匹配偏弱"
+        if value < 0.30:
+            return "本次关键词匹配一般"
+        if value < 0.50:
+            return "本次关键词匹配良好"
+        return "本次关键词高度吻合"
+    if key == "lexical_js_similarity":
+        if value < 0.05:
+            return "本次词频结构相差较大"
+        if value < 0.15:
+            return "本次词频结构匹配偏弱"
+        if value < 0.30:
+            return "本次词频结构相似度一般"
+        if value < 0.50:
+            return "本次词频结构匹配良好"
+        return "本次词频结构高度一致"
+    if key == "garbled_ratio":
+        if value <= 1e-4:
+            return "本次无明显乱码"
+        if value < 0.01:
+            return "本次乱码比例很低"
+        if value < 0.05:
+            return "本次乱码偏多，需要关注"
+        return "本次乱码严重，需立即处理"
+    if key == "word_noncompliance_ratio":
+        if value <= 1e-4:
+            return "本次词语合规性完全正常"
+        if value < 0.01:
+            return "本次词语合规性轻微异常"
+        if value < 0.05:
+            return "本次词语合规性偏弱"
+        return "本次词语合规性严重不足"
+    return "本次指标无预设评估标准"
+
+
+def _describe_penalty_component(value: float, label: str) -> str:
+    """Return a qualitative summary for a penalty component."""
+
+    if math.isnan(value):
+        return f"{label}缺失"
+    if value <= 1e-4:
+        return f"{label}几乎为零"
+    if value < 0.01:
+        return f"{label}轻微"
+    if value < 0.05:
+        return f"{label}偏高"
+    return f"{label}严重"
+
+
+def _describe_reward_quality(value: float) -> str:
+    """Return a qualitative description of the scalar reward."""
+
+    if math.isnan(value):
+        return "奖励缺失"
+    if value > 0.8:
+        return "本次获得显著正向反馈"
+    if value > 0.0:
+        return "本次获得轻度正向反馈"
+    if value == 0.0:
+        return "本次奖惩持平"
+    if value > -0.5:
+        return "本次受到轻微惩罚"
+    return "本次受到严重惩罚"
 
 
 def _append_csv_row(path: Path, headers: Sequence[str], row: Mapping[str, Any]) -> None:
@@ -1196,13 +1312,23 @@ class DemoTrainer(Trainer):
             ]
             for label, key, description in metric_descriptions:
                 value = float(log_metrics.get(key, 0.0))
-                print(f"{metric_indent}{label}={value:.3f} （{description}）")
-            print(
-                f"{metric_indent}penalties={log_metrics['garbled_penalty']:.3f}/"
-                f"{log_metrics['word_penalty']:.3f} （乱码与词合规惩罚项，越高惩罚越重）"
+                quality = _describe_metric_quality(key, value)
+                print(f"{metric_indent}{label}={value:.3f} （{description}；{quality}）")
+            garbled_penalty = float(log_metrics["garbled_penalty"])
+            word_penalty = float(log_metrics["word_penalty"])
+            penalty_quality = "；".join(
+                [
+                    _describe_penalty_component(garbled_penalty, "乱码惩罚"),
+                    _describe_penalty_component(word_penalty, "词合规惩罚"),
+                ]
             )
             print(
-                f"{metric_indent}reward={transition.reward:.3f} （综合奖励，负值说明当前摘要受到惩罚多于鼓励）"
+                f"{metric_indent}penalties={garbled_penalty:.3f}/{word_penalty:.3f} "
+                f"（乱码与词合规惩罚项，越高惩罚越重；{penalty_quality}）"
+            )
+            reward_quality = _describe_reward_quality(transition.reward)
+            print(
+                f"{metric_indent}reward={transition.reward:.3f} （综合奖励，负值说明当前摘要受到惩罚多于鼓励；{reward_quality}）"
             )
             if log_metrics:
                 self.log(log_metrics, global_step)
