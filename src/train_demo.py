@@ -12,19 +12,20 @@ from __future__ import annotations
 import argparse
 import csv
 import difflib
+import itertools
 import json
 import math
 import random
-import subprocess
-import statistics
-import sys
-import unicodedata
-import itertools
 import re
+import statistics
+import subprocess
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
+
+import unicodedata
 
 try:  # pragma: no cover - import guard exercised in tests via fallback path
     import torch
@@ -32,6 +33,7 @@ try:  # pragma: no cover - import guard exercised in tests via fallback path
     from torch.distributions import Categorical
     from torch.nn import functional as F
     from torch.nn.utils.rnn import pack_padded_sequence
+
     TORCH_AVAILABLE = True
 except ModuleNotFoundError:  # pragma: no cover - exercised in CI without torch
     torch = None  # type: ignore[assignment]
@@ -249,11 +251,11 @@ class CharTokenizer:
     UNK = "<unk>"
 
     def __init__(
-        self,
-        texts: Sequence[str],
-        *,
-        summary_charset: set[str] | None = None,
-        punctuation_whitelist: set[str] | None = None,
+            self,
+            texts: Sequence[str],
+            *,
+            summary_charset: set[str] | None = None,
+            punctuation_whitelist: set[str] | None = None,
     ) -> None:
         charset = set()
         for text in texts:
@@ -346,7 +348,7 @@ class CharTokenizer:
         return "".join(decoded)
 
     def batch_encode(
-        self, sequences: Sequence[Sequence[int]], *, device: torch.device
+            self, sequences: Sequence[Sequence[int]], *, device: torch.device
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if not sequences:
             raise ValueError("Cannot encode an empty batch of sequences.")
@@ -466,7 +468,6 @@ class Operation:
     payload: str | tuple[str, str] | None = None
 
 
-
 class OperationParser:
     """Parse textual actions into structured operations."""
 
@@ -551,7 +552,7 @@ class OperationParser:
 
     @classmethod
     def _parse_structured_line(
-        cls, line: str
+            cls, line: str
     ) -> list[tuple[str, str | tuple[str, str]]]:
         operations: list[tuple[str, str | tuple[str, str]]] = []
         parts = line.split(maxsplit=1)
@@ -571,7 +572,7 @@ class OperationParser:
 
     @classmethod
     def _heuristic_parse_line(
-        cls, line: str
+            cls, line: str
     ) -> list[tuple[str, str | tuple[str, str]]]:
         results: list[tuple[str, str | tuple[str, str]]] = []
         fragment = line.strip()
@@ -587,7 +588,8 @@ class OperationParser:
                     else:
                         results.append((command, payload))
                 return results
-        pattern = re.compile(r"(acquire|collect|extract|gather|verify|confirm|hedge|trim|commit|link|connect|relate)", re.IGNORECASE)
+        pattern = re.compile(r"(acquire|collect|extract|gather|verify|confirm|hedge|trim|commit|link|connect|relate)",
+                             re.IGNORECASE)
         for match in pattern.finditer(fragment):
             keyword = match.group(1).lower()
             command = cls.NATURAL_KEYWORDS.get(keyword)
@@ -606,7 +608,6 @@ class OperationParser:
                 results.append(("LINK", cls._heuristic_link_payload(payload)))
             else:
                 results.append((command, payload))
-
 
     @classmethod
     def _heuristic_link_payload(cls, payload: str) -> tuple[str, str]:
@@ -645,6 +646,8 @@ class OperationParser:
         if len(tokens) == 2:
             return tokens[0].strip(), tokens[1].strip()
         return payload.strip(), payload.strip()
+
+
 class CognitiveCapital:
     """Stateful representation of extracted knowledge."""
 
@@ -792,10 +795,10 @@ class CapitalValuator:
     def value(self, capital: CognitiveCapital) -> float:
         metrics = self.metrics(capital)
         raw_value = (
-            CAPITAL_COVERAGE_WEIGHT * metrics["coverage"]
-            + CAPITAL_DIVERSITY_WEIGHT * metrics["diversity"]
-            - CAPITAL_REDUNDANCY_WEIGHT * metrics["redundancy"]
-            + CAPITAL_VERIFICATION_BONUS * metrics["verification"]
+                CAPITAL_COVERAGE_WEIGHT * metrics["coverage"]
+                + CAPITAL_DIVERSITY_WEIGHT * metrics["diversity"]
+                - CAPITAL_REDUNDANCY_WEIGHT * metrics["redundancy"]
+                + CAPITAL_VERIFICATION_BONUS * metrics["verification"]
         )
         hedge_discount = 1.0 - 0.2 * metrics["hedge"]
         return max(raw_value * hedge_discount, 0.0)
@@ -1074,14 +1077,11 @@ def _parse_int(value: Any) -> int:
         return 0
 
 
-
 ANSI_REWARD_TAGS = {
     ANSI_GREEN: "[reward>0]",
     ANSI_RED: "[reward<0]",
     ANSI_YELLOW: "[reward=0]",
 }
-
-
 
 
 def _append_step_log(lines: Sequence[str], block_color: str) -> None:
@@ -1097,10 +1097,6 @@ def _append_step_log(lines: Sequence[str], block_color: str) -> None:
         handle.write("\n")
 
 
-
-
-
-
 def _console_log(message: str, *, color: str | None = None, log: bool = True) -> None:
     if color:
         print(f"{color}{message}{ANSI_RESET}")
@@ -1113,11 +1109,9 @@ def _console_log(message: str, *, color: str | None = None, log: bool = True) ->
             handle.write(f"{message}\n")
 
 
-
-
 def _build_rewards_dashboard_html(
-    step_rows: Sequence[Mapping[str, Any]],
-    round_rows: Sequence[Mapping[str, Any]],
+        step_rows: Sequence[Mapping[str, Any]],
+        round_rows: Sequence[Mapping[str, Any]],
 ) -> str:
     """Construct a standalone HTML dashboard summarizing reward trends."""
 
@@ -1282,8 +1276,8 @@ def _build_rewards_dashboard_html(
 
 
 def _write_rewards_dashboard(
-    step_rows: Sequence[Mapping[str, Any]],
-    round_rows: Sequence[Mapping[str, Any]],
+        step_rows: Sequence[Mapping[str, Any]],
+        round_rows: Sequence[Mapping[str, Any]],
 ) -> None:
     """Persist ``rewards.html`` reflecting the current CSV contents."""
 
@@ -1294,9 +1288,9 @@ def _write_rewards_dashboard(
 
 
 def save_agent_snapshot(
-    agent: "DemoSACAgent",
-    metadata: Mapping[str, Any],
-    path: Path,
+        agent: "DemoSACAgent",
+        metadata: Mapping[str, Any],
+        path: Path,
 ) -> MutableMapping[str, Any]:
     """Serialize ``agent`` state alongside ``metadata`` to ``path``."""
 
@@ -1310,7 +1304,7 @@ def save_agent_snapshot(
 
 
 def _compute_garbled_statistics(
-    summary: str, tokenizer: CharTokenizer
+        summary: str, tokenizer: CharTokenizer
 ) -> Tuple[float, float, float, float]:
     """Return ratios describing garbled content in ``summary``."""
 
@@ -1363,15 +1357,15 @@ def _combine_summary_and_chapter(previous_summary: str, chapter: str) -> str:
 
 
 def analyze_summary(
-    summary: str,
-    source_text: str,
-    *,
-    tokenizer: CharTokenizer | None = None,
-    word_checker: WordComplianceChecker | None = None,
-    chapter_text: str | None = None,
-    chapter_index: int | None = None,
-    lexical_stats: ChapterLexicalStatistics | None = None,
-    lexical_tokenizer: LexicalTokenizer | None = None,
+        summary: str,
+        source_text: str,
+        *,
+        tokenizer: CharTokenizer | None = None,
+        word_checker: WordComplianceChecker | None = None,
+        chapter_text: str | None = None,
+        chapter_index: int | None = None,
+        lexical_stats: ChapterLexicalStatistics | None = None,
+        lexical_tokenizer: LexicalTokenizer | None = None,
 ) -> MutableMapping[str, float]:
     """Compute quality statistics for the provided summary."""
 
@@ -1402,9 +1396,9 @@ def analyze_summary(
     lexical_js_similarity = 0.0
     lexical_token_count = 0
     if (
-        lexical_stats is not None
-        and lexical_tokenizer is not None
-        and chapter_index is not None
+            lexical_stats is not None
+            and lexical_tokenizer is not None
+            and chapter_index is not None
     ):
         try:
             chapter_entry = lexical_stats.chapter_by_index(chapter_index)
@@ -1472,7 +1466,7 @@ def _resolve_lexical_stats_path(article_path: Path) -> Path | None:
 
 
 def _load_lexical_statistics_from_path(
-    stats_path: Path,
+        stats_path: Path,
 ) -> tuple[ChapterLexicalStatistics, LexicalTokenizer]:
     stats = ChapterLexicalStatistics.load(stats_path)
     try:
@@ -1490,7 +1484,7 @@ def _load_lexical_statistics_from_path(
 
 
 def _load_lexical_statistics(
-    article_path: Path,
+        article_path: Path,
 ) -> tuple[ChapterLexicalStatistics | None, LexicalTokenizer | None]:
     stats_path = _resolve_lexical_stats_path(article_path)
     if stats_path is None:
@@ -1499,9 +1493,9 @@ def _load_lexical_statistics(
 
 
 def _ensure_lexical_statistics(
-    article_path: Path,
-    *,
-    recompute: bool = False,
+        article_path: Path,
+        *,
+        recompute: bool = False,
 ) -> tuple[ChapterLexicalStatistics | None, LexicalTokenizer | None]:
     stats_path = _resolve_lexical_stats_path(article_path)
     output_path = article_path.parent / f"{article_path.stem}{LEXICAL_STATS_SUFFIX}"
@@ -1551,10 +1545,10 @@ def _ensure_lexical_statistics(
 
 
 def _run_inline_lexical_evaluation(
-    lexical_stats: ChapterLexicalStatistics | None,
-    lexical_tokenizer: LexicalTokenizer | None,
-    chapter_index: int,
-    summary_paths: Sequence[Path],
+        lexical_stats: ChapterLexicalStatistics | None,
+        lexical_tokenizer: LexicalTokenizer | None,
+        chapter_index: int,
+        summary_paths: Sequence[Path],
 ) -> None:
     if lexical_stats is None or lexical_tokenizer is None:
         print('警告：缺少词频缓存，跳过词频指标评估。')
@@ -1599,14 +1593,14 @@ class ArticleEnvironment:
     """Environment emitting text observations and accepting text actions."""
 
     def __init__(
-        self,
-        chapters: Sequence[str],
-        *,
-        tokenizer: CharTokenizer,
-        lexical_statistics: ChapterLexicalStatistics | None = None,
-        lexical_tokenizer: LexicalTokenizer | None = None,
-        initial_budget: float = DEFAULT_INITIAL_BUDGET,
-        cost_weight: float = COST_WEIGHT,
+            self,
+            chapters: Sequence[str],
+            *,
+            tokenizer: CharTokenizer,
+            lexical_statistics: ChapterLexicalStatistics | None = None,
+            lexical_tokenizer: LexicalTokenizer | None = None,
+            initial_budget: float = DEFAULT_INITIAL_BUDGET,
+            cost_weight: float = COST_WEIGHT,
     ) -> None:
         if not chapters:
             raise ValueError("The environment requires at least one chapter.")
@@ -1687,10 +1681,10 @@ class ArticleEnvironment:
         done = self._cursor + 1 >= len(self._chapters)
         if done:
             base_reward = (
-            capital_value
-            - self._cost_weight * self._cumulative_cost
-            - BUDGET_PENALTY_WEIGHT * budget_breach
-            - BUDGET_PENALTY_WEIGHT * budget_breach
+                    capital_value
+                    - self._cost_weight * self._cumulative_cost
+                    - BUDGET_PENALTY_WEIGHT * budget_breach
+                    - BUDGET_PENALTY_WEIGHT * budget_breach
             )
             base_reward = -BUDGET_PENALTY_WEIGHT * budget_breach
 
@@ -1703,17 +1697,17 @@ class ArticleEnvironment:
         word_noncompliance = metrics.get("word_noncompliance_ratio", 0.0)
 
         quality_component = (
-            _nonlinear_reward(similarity_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_SIMILARITY_WEIGHT
-            + _nonlinear_reward(coverage_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_COVERAGE_WEIGHT
-            + _nonlinear_reward(novelty_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_NOVELTY_WEIGHT
+                _nonlinear_reward(similarity_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_SIMILARITY_WEIGHT
+                + _nonlinear_reward(coverage_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_COVERAGE_WEIGHT
+                + _nonlinear_reward(novelty_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_NOVELTY_WEIGHT
         )
         lexical_component = (
-            _nonlinear_reward(lexical_cosine, LEXICAL_NONLINEAR_EXPONENT) * LEXICAL_SIMILARITY_WEIGHT
-            + _nonlinear_reward(lexical_js, LEXICAL_NONLINEAR_EXPONENT) * LEXICAL_JS_WEIGHT
+                _nonlinear_reward(lexical_cosine, LEXICAL_NONLINEAR_EXPONENT) * LEXICAL_SIMILARITY_WEIGHT
+                + _nonlinear_reward(lexical_js, LEXICAL_NONLINEAR_EXPONENT) * LEXICAL_JS_WEIGHT
         )
         cleanliness_penalty = (
-            _nonlinear_reward(garbled_ratio, CLEANLINESS_NONLINEAR_EXPONENT) * GARBLED_REWARD_WEIGHT
-            + _nonlinear_reward(word_noncompliance, CLEANLINESS_NONLINEAR_EXPONENT) * WORD_COMPLIANCE_REWARD_WEIGHT
+                _nonlinear_reward(garbled_ratio, CLEANLINESS_NONLINEAR_EXPONENT) * GARBLED_REWARD_WEIGHT
+                + _nonlinear_reward(word_noncompliance, CLEANLINESS_NONLINEAR_EXPONENT) * WORD_COMPLIANCE_REWARD_WEIGHT
         )
         soft_reward = quality_component + lexical_component - cleanliness_penalty
 
@@ -1776,6 +1770,7 @@ class ArticleEnvironment:
     def lexical_tokenizer(self) -> LexicalTokenizer | None:
         return self._lexical_tokenizer
 
+
 class SimpleReplayBuffer(BaseReplayBuffer):
     """In-memory FIFO replay buffer used solely for the demonstration."""
 
@@ -1790,22 +1785,23 @@ class SimpleReplayBuffer(BaseReplayBuffer):
         size = min(len(self._storage), batch_size)
         return random.sample(self._storage, size)
 
+
 class TextPolicyNetwork(nn.Module):
     """Stochastic policy operating on character token sequences."""
 
     def __init__(
-        self,
-        vocab_size: int,
-        embedding_dim: int,
-        hidden_dim: int,
-        max_summary_length: int,
-        bos_token_id: int,
-        eos_token_id: int,
-        *,
-        tokenizer: CharTokenizer | None = None,
-        word_checker: WordComplianceChecker | None = None,
-        compliance_temperature: float = DEFAULT_COMPLIANCE_TEMPERATURE,
-        invalid_logit_penalty: float = COMPLIANCE_INVALID_LOGIT_PENALTY,
+            self,
+            vocab_size: int,
+            embedding_dim: int,
+            hidden_dim: int,
+            max_summary_length: int,
+            bos_token_id: int,
+            eos_token_id: int,
+            *,
+            tokenizer: CharTokenizer | None = None,
+            word_checker: WordComplianceChecker | None = None,
+            compliance_temperature: float = DEFAULT_COMPLIANCE_TEMPERATURE,
+            invalid_logit_penalty: float = COMPLIANCE_INVALID_LOGIT_PENALTY,
     ) -> None:
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
@@ -1822,10 +1818,10 @@ class TextPolicyNetwork(nn.Module):
         self._invalid_logit_penalty = abs(invalid_logit_penalty)
 
     def _adjust_logits_with_compliance(
-        self,
-        logits: torch.Tensor,
-        prev_tokens: torch.Tensor,
-        finished: torch.Tensor,
+            self,
+            logits: torch.Tensor,
+            prev_tokens: torch.Tensor,
+            finished: torch.Tensor,
     ) -> torch.Tensor:
         if self._word_checker is None or self._tokenizer_ref is None:
             return logits
@@ -1857,19 +1853,19 @@ class TextPolicyNetwork(nn.Module):
                 continue
             adjusted[batch_idx, mask] = adjusted[batch_idx, mask] - self._invalid_logit_penalty
             if (
-                self._compliance_temperature < 1.0
-                and len(allowed_ids) < candidate_count
+                    self._compliance_temperature < 1.0
+                    and len(allowed_ids) < candidate_count
             ):
                 allowed_tensor = torch.tensor(
                     list(allowed_ids), dtype=torch.long, device=adjusted.device
                 )
                 adjusted[batch_idx, allowed_tensor] = (
-                    adjusted[batch_idx, allowed_tensor] / self._compliance_temperature
+                        adjusted[batch_idx, allowed_tensor] / self._compliance_temperature
                 )
         return adjusted
 
     def forward(
-        self, tokens: torch.Tensor, lengths: torch.Tensor
+            self, tokens: torch.Tensor, lengths: torch.Tensor
     ) -> tuple[torch.Tensor, MutableMapping[str, torch.Tensor]]:
         embedded = self.embedding(tokens)
         packed = pack_padded_sequence(
@@ -1976,11 +1972,11 @@ class TextQNetwork(nn.Module):
         return summed / counts
 
     def forward(
-        self,
-        state_tokens: torch.Tensor,
-        state_lengths: torch.Tensor,
-        action_tokens: torch.Tensor,
-        action_lengths: torch.Tensor,
+            self,
+            state_tokens: torch.Tensor,
+            state_lengths: torch.Tensor,
+            action_tokens: torch.Tensor,
+            action_lengths: torch.Tensor,
     ) -> torch.Tensor:
         del state_lengths, action_lengths  # lengths are implicit in the masking
         state_embedded = self.embedding(state_tokens)
@@ -2010,13 +2006,13 @@ class DemoNetworkFactory(NetworkFactory):
     invalid_logit_penalty: float = COMPLIANCE_INVALID_LOGIT_PENALTY
 
     def build_policy(
-        self,
-        *args: Any,
-        tokenizer: CharTokenizer | None = None,
-        word_checker: WordComplianceChecker | None = None,
-        compliance_temperature: float | None = None,
-        invalid_logit_penalty: float | None = None,
-        **kwargs: Any,
+            self,
+            *args: Any,
+            tokenizer: CharTokenizer | None = None,
+            word_checker: WordComplianceChecker | None = None,
+            compliance_temperature: float | None = None,
+            invalid_logit_penalty: float | None = None,
+            **kwargs: Any,
     ) -> TextPolicyNetwork:
         temperature = (
             compliance_temperature
@@ -2042,7 +2038,7 @@ class DemoNetworkFactory(NetworkFactory):
         )
 
     def build_q_functions(
-        self, *args: Any, **kwargs: Any
+            self, *args: Any, **kwargs: Any
     ) -> tuple[TextQNetwork, TextQNetwork]:
         return (
             TextQNetwork(self.vocab_size, self.embedding_dim, self.hidden_dim),
@@ -2054,18 +2050,18 @@ class DemoSACAgent(SACAgent):
     """Concrete SAC agent operating on text observations and actions."""
 
     def __init__(
-        self,
-        policy: TextPolicyNetwork,
-        q1: TextQNetwork,
-        q2: TextQNetwork,
-        target_q1: TextQNetwork,
-        target_q2: TextQNetwork,
-        replay_buffer: BaseReplayBuffer,
-        config: AgentConfig,
-        *,
-        tokenizer: CharTokenizer,
-        update_batch_size: int = 4,
-        device: str = "cpu",
+            self,
+            policy: TextPolicyNetwork,
+            q1: TextQNetwork,
+            q2: TextQNetwork,
+            target_q1: TextQNetwork,
+            target_q2: TextQNetwork,
+            replay_buffer: BaseReplayBuffer,
+            config: AgentConfig,
+            *,
+            tokenizer: CharTokenizer,
+            update_batch_size: int = 4,
+            device: str = "cpu",
     ) -> None:
         super().__init__(policy, q1, q2, target_q1, target_q2, replay_buffer, config)
         self.tokenizer = tokenizer
@@ -2191,7 +2187,7 @@ class DemoSACAgent(SACAgent):
             new_action_lengths,
         )
         policy_loss = (
-            self.alpha * policy_info["log_prob"] - q1_for_policy
+                self.alpha * policy_info["log_prob"] - q1_for_policy
         ).mean()
 
         self.policy_optimizer.zero_grad()
@@ -2239,15 +2235,15 @@ class DemoSACAgent(SACAgent):
 
     @classmethod
     def from_factory(
-        cls,
-        factory: DemoNetworkFactory,
-        replay_buffer: BaseReplayBuffer,
-        config: AgentConfig,
-        *,
-        tokenizer: CharTokenizer,
-        word_checker: WordComplianceChecker | None = None,
-        update_batch_size: int = 4,
-        device: str = "cpu",
+            cls,
+            factory: DemoNetworkFactory,
+            replay_buffer: BaseReplayBuffer,
+            config: AgentConfig,
+            *,
+            tokenizer: CharTokenizer,
+            word_checker: WordComplianceChecker | None = None,
+            update_batch_size: int = 4,
+            device: str = "cpu",
     ) -> "DemoSACAgent":
         policy = factory.build_policy(
             tokenizer=tokenizer, word_checker=word_checker
@@ -2272,13 +2268,13 @@ class DemoTrainer(Trainer):
     """Trainer that runs rollouts for the iterative text summarization demo."""
 
     def __init__(
-        self,
-        agent: DemoSACAgent,
-        environment: ArticleEnvironment,
-        config: TrainerConfig,
-        *,
-        intervals: Sequence[str],
-        logger: MutableMapping[str, Any] | None = None,
+            self,
+            agent: DemoSACAgent,
+            environment: ArticleEnvironment,
+            config: TrainerConfig,
+            *,
+            intervals: Sequence[str],
+            logger: MutableMapping[str, Any] | None = None,
     ) -> None:
         super().__init__(agent, environment, config, logger)
         self._intervals = list(intervals)
@@ -2304,6 +2300,7 @@ class DemoTrainer(Trainer):
             )
             source_len, source_preview = _format_text_debug(source_text, 20, 20)
             block_color = ANSI_YELLOW
+
             def _colorize(line: str) -> str:
                 return f"{block_color}{line}{ANSI_RESET}"
 
@@ -2492,8 +2489,8 @@ class DemoTrainer(Trainer):
                 total_reward = 0.0
                 state = self.environment.reset()
         if (
-            self.config.updates_per_round > 0
-            and len(self.agent.replay_buffer) >= self.config.batch_size
+                self.config.updates_per_round > 0
+                and len(self.agent.replay_buffer) >= self.config.batch_size
         ):
             print(
                 f"=== Post-round updates (round {round_index}) "
@@ -2575,18 +2572,13 @@ class DemoTrainer(Trainer):
             print(f"    {line}")
 
 
-
-
-
-
 def _normalize_fact_snippet(text: str, max_chars: int = 120) -> str:
     collapsed = " ".join(text.strip().split())
     return collapsed[:max_chars]
 
 
 def _extract_candidate_sentences(chapter_text: str, max_sentences: int = 3) -> list[str]:
-    sentences = re.split(r"[。！？!?\.]+|
-+", chapter_text)
+    sentences = re.split(r"[。！？!?\.]+", chapter_text)
     candidates: list[str] = []
     for sentence in sentences:
         normalized = _normalize_fact_snippet(sentence)
@@ -2618,25 +2610,26 @@ def _build_template_action(chapter_text: str, chapter_index: int) -> str:
     if len(sentences) > 2:
         tertiary = sentences[2]
         commands.append(f"COMMIT {fact_label} {tertiary}")
-    return "
-".join(cmd for cmd in commands if cmd.strip())
+    return "".join(cmd for cmd in commands if cmd.strip())
 
 
 def _create_text_action(action_text: str, tokenizer: CharTokenizer) -> TextAction:
     token_ids = tokenizer.encode_action_text(action_text)
     return TextAction(token_ids=token_ids, text=action_text, length=len(token_ids))
+
+
 def _create_text_action(action_text: str, tokenizer: CharTokenizer) -> TextAction:
     token_ids = tokenizer.encode_action_text(action_text)
     return TextAction(token_ids=token_ids, text=action_text, length=len(token_ids))
 
 
 def _seed_replay_buffer_with_templates(
-    environment: ArticleEnvironment,
-    replay_buffer: BaseReplayBuffer,
-    tokenizer: CharTokenizer,
-    observations: Sequence[TextObservation],
-    *,
-    max_seed_steps: int = 4,
+        environment: ArticleEnvironment,
+        replay_buffer: BaseReplayBuffer,
+        tokenizer: CharTokenizer,
+        observations: Sequence[TextObservation],
+        *,
+        max_seed_steps: int = 4,
 ) -> list[tuple[str, float]]:
     if max_seed_steps <= 0:
         return []
@@ -2654,18 +2647,20 @@ def _seed_replay_buffer_with_templates(
             break
     environment.reset()
     return seeds
+
+
 def _create_text_action(action_text: str, tokenizer: CharTokenizer) -> TextAction:
     token_ids = tokenizer.encode_action_text(action_text)
     return TextAction(token_ids=token_ids, text=action_text, length=len(token_ids))
 
 
 def _seed_replay_buffer_with_templates(
-    environment: ArticleEnvironment,
-    replay_buffer: BaseReplayBuffer,
-    tokenizer: CharTokenizer,
-    observations: Sequence[TextObservation],
-    *,
-    max_seed_steps: int = 4,
+        environment: ArticleEnvironment,
+        replay_buffer: BaseReplayBuffer,
+        tokenizer: CharTokenizer,
+        observations: Sequence[TextObservation],
+        *,
+        max_seed_steps: int = 4,
 ) -> list[tuple[str, float]]:
     if max_seed_steps <= 0:
         return []
@@ -2683,13 +2678,15 @@ def _seed_replay_buffer_with_templates(
             break
     environment.reset()
     return seeds
+
+
 def build_demo_components(
-    article_path: Path,
-    capacity: int,
-    *,
-    precomputed: Sequence[TextObservation] | None = None,
-    lexical_stats: ChapterLexicalStatistics | None = None,
-    lexical_tokenizer: LexicalTokenizer | None = None,
+        article_path: Path,
+        capacity: int,
+        *,
+        precomputed: Sequence[TextObservation] | None = None,
+        lexical_stats: ChapterLexicalStatistics | None = None,
+        lexical_tokenizer: LexicalTokenizer | None = None,
 ) -> tuple[DemoSACAgent, DemoTrainer]:
     if precomputed is None:
         observations = load_article_features(article_path)
@@ -2931,5 +2928,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
