@@ -74,6 +74,9 @@ STEP_CSV_HEADERS = [
     "step",
     "global_step",
     "reward",
+    "reward_base",
+    "reward_potential_gain",
+    "reward_soft_bonus",
     "previous_summary_length",
     "chapter_length",
     "source_length",
@@ -463,6 +466,7 @@ class Operation:
     payload: str | tuple[str, str] | None = None
 
 
+
 class OperationParser:
     """Parse textual actions into structured operations."""
 
@@ -475,27 +479,159 @@ class OperationParser:
         "CMIT": "COMMIT",
         "LNK": "LINK",
     }
+    NATURAL_KEYWORDS: Mapping[str, str] = {
+        "acquire": "ACQUIRE",
+        "collect": "ACQUIRE",
+        "extract": "EXTRACT",
+        "gather": "ACQUIRE",
+        "verify": "VERIFY",
+        "confirm": "VERIFY",
+        "hedge": "HEDGE",
+        "trim": "TRIM",
+        "commit": "COMMIT",
+        "link": "LINK",
+        "connect": "LINK",
+        "relate": "LINK",
+    }
+    FREEFORM_PREFIXES: Mapping[str, str] = {
+        "fact": "ACQUIRE",
+        "evidence": "ACQUIRE",
+        "hypothesis": "ACQUIRE",
+        "note": "ACQUIRE",
+        "verification": "VERIFY",
+        "link": "LINK",
+    }
 
     @classmethod
     def parse(cls, action_text: str) -> list[Operation]:
         operations: list[Operation] = []
         if not action_text:
             return operations
+        seen: set[tuple[str, tuple[str, ...]]] = set()
+
+        def normalize_payload(payload: str | tuple[str, str] | None) -> tuple[str, ...]:
+            if isinstance(payload, tuple):
+                return tuple(part.strip() for part in payload if part and part.strip()) or ("",)
+            if payload is None:
+                return ("",)
+            cleaned = payload.strip()
+            return (cleaned,) if cleaned else ("",)
+
+        def register(command: str, payload: str | tuple[str, str] | None) -> None:
+            normalized_command = command.upper()
+            key = (normalized_command, normalize_payload(payload))
+            if key in seen:
+                return
+            seen.add(key)
+            if isinstance(payload, tuple):
+                payload_value: str | tuple[str, str] = tuple(part.strip() for part in payload)
+            elif payload is None:
+                payload_value = ""
+            else:
+                payload_value = payload.strip()
+            operations.append(Operation(normalized_command, payload_value))
+
         for raw_line in action_text.splitlines():
             line = raw_line.strip()
             if not line:
                 continue
-            parts = line.split(maxsplit=1)
-            command = parts[0].upper()
-            command = cls.COMMAND_ALIASES.get(command, command)
-            payload = parts[1].strip() if len(parts) > 1 else ""
-            if command == "LINK":
-                left, right = cls._parse_link_payload(payload)
-                operations.append(Operation(command, (left, right)))
+            parsed = cls._parse_structured_line(line)
+            if parsed:
+                for command, payload in parsed:
+                    register(command, payload)
                 continue
-            if command in {"ACQUIRE", "EXTRACT", "VERIFY", "HEDGE", "TRIM", "COMMIT"}:
-                operations.append(Operation(command, payload))
+            for command, payload in cls._heuristic_parse_line(line):
+                register(command, payload)
+
+        if not operations:
+            for command, payload in cls._heuristic_parse_line(action_text):
+                register(command, payload)
+
         return operations
+
+    @classmethod
+    def _parse_structured_line(
+        cls, line: str
+    ) -> list[tuple[str, str | tuple[str, str]]]:
+        operations: list[tuple[str, str | tuple[str, str]]] = []
+        parts = line.split(maxsplit=1)
+        if not parts:
+            return operations
+        command = parts[0].upper()
+        command = cls.COMMAND_ALIASES.get(command, command)
+        payload = parts[1].strip() if len(parts) > 1 else ""
+        if command == "LINK":
+            left, right = cls._parse_link_payload(payload)
+            if left or right:
+                operations.append(("LINK", (left, right)))
+            return operations
+        if command in {"ACQUIRE", "EXTRACT", "VERIFY", "HEDGE", "TRIM", "COMMIT"}:
+            operations.append((command, payload))
+        return operations
+
+    @classmethod
+    def _heuristic_parse_line(
+        cls, line: str
+    ) -> list[tuple[str, str | tuple[str, str]]]:
+        results: list[tuple[str, str | tuple[str, str]]] = []
+        fragment = line.strip()
+        if not fragment:
+            return results
+        lower = fragment.lower()
+        for prefix, command in cls.FREEFORM_PREFIXES.items():
+            if lower.startswith(prefix + ":"):
+                payload = fragment.split(":", 1)[1].strip()
+                if payload:
+                    if command == "LINK":
+                        results.append(("LINK", cls._heuristic_link_payload(payload)))
+                    else:
+                        results.append((command, payload))
+                return results
+        pattern = re.compile(r"(acquire|collect|extract|gather|verify|confirm|hedge|trim|commit|link|connect|relate)", re.IGNORECASE)
+        for match in pattern.finditer(fragment):
+            keyword = match.group(1).lower()
+            command = cls.NATURAL_KEYWORDS.get(keyword)
+            if not command:
+                continue
+            remainder = fragment[match.end():]
+            split_match = re.search(r"[.;。！？!?]\s*", remainder)
+            if split_match:
+                payload = remainder[:split_match.start()]
+            else:
+                payload = remainder
+            payload = payload.strip(" :-"'()[]")
+            if not payload:
+                payload = fragment[:match.start()].strip(" :-"'()[]")
+            if command == "LINK":
+                results.append(("LINK", cls._heuristic_link_payload(payload)))
+            else:
+                results.append((command, payload))
+        return results
+
+    @classmethod
+    def _heuristic_link_payload(cls, payload: str) -> tuple[str, str]:
+        stripped = payload.strip()
+        if not stripped:
+            return "", ""
+        if "->" in stripped or "=>" in stripped:
+            return cls._parse_link_payload(stripped)
+        lower = stripped.lower()
+        for separator in [" to ", " into ", " toward ", " towards ", " against "]:
+            if separator in lower:
+                parts = re.split(separator, stripped, maxsplit=1, flags=re.IGNORECASE)
+                if len(parts) == 2:
+                    return parts[0].strip(), parts[1].strip()
+        if " and " in lower:
+            parts = re.split(r"and", stripped, maxsplit=1, flags=re.IGNORECASE)
+            if len(parts) == 2:
+                return parts[0].strip(), parts[1].strip()
+        tokens = stripped.split()
+        if len(tokens) >= 4:
+            midpoint = len(tokens) // 2
+            left = " ".join(tokens[:midpoint]).strip()
+            right = " ".join(tokens[midpoint:]).strip()
+            return left or stripped, right or stripped
+        return stripped, stripped
 
     @staticmethod
     def _parse_link_payload(payload: str) -> tuple[str, str]:
@@ -509,8 +645,6 @@ class OperationParser:
         if len(tokens) == 2:
             return tokens[0].strip(), tokens[1].strip()
         return payload.strip(), payload.strip()
-
-
 class CognitiveCapital:
     """Stateful representation of extracted knowledge."""
 
@@ -1545,19 +1679,45 @@ class ArticleEnvironment:
         self._budget -= step_cost
         self._cumulative_cost += step_cost
         budget_breach = max(0.0, -self._budget)
-        capital_metrics = self._valuator.metrics(self._capital)
-        capital_value = self._valuator.value(self._capital)
-        potential_after = self._valuator.potential(self._capital)
-        done = self._cursor + 1 >= len(self._chapters)
-        if done:
-            base_reward = (
-                capital_value
-                - self._cost_weight * self._cumulative_cost
-                - BUDGET_PENALTY_WEIGHT * budget_breach
-            )
-        else:
-            base_reward = -BUDGET_PENALTY_WEIGHT * budget_breach
-        reward = base_reward + (potential_after - potential_before)
+
+capital_metrics = self._valuator.metrics(self._capital)
+capital_value = self._valuator.value(self._capital)
+potential_after = self._valuator.potential(self._capital)
+potential_gain = potential_after - potential_before
+done = self._cursor + 1 >= len(self._chapters)
+if done:
+    base_reward = (
+        capital_value
+        - self._cost_weight * self._cumulative_cost
+        - BUDGET_PENALTY_WEIGHT * budget_breach
+    )
+else:
+    base_reward = -BUDGET_PENALTY_WEIGHT * budget_breach
+
+similarity_score = metrics.get("similarity", 0.0)
+coverage_score = metrics.get("coverage_ratio", 0.0)
+novelty_score = max(0.0, metrics.get("novelty_ratio", 0.0))
+lexical_cosine = metrics.get("lexical_cosine", 0.0)
+lexical_js = metrics.get("lexical_js_similarity", 0.0)
+garbled_ratio = metrics.get("garbled_ratio", 0.0)
+word_noncompliance = metrics.get("word_noncompliance_ratio", 0.0)
+
+quality_component = (
+    _nonlinear_reward(similarity_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_SIMILARITY_WEIGHT
+    + _nonlinear_reward(coverage_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_COVERAGE_WEIGHT
+    + _nonlinear_reward(novelty_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_NOVELTY_WEIGHT
+)
+lexical_component = (
+    _nonlinear_reward(lexical_cosine, LEXICAL_NONLINEAR_EXPONENT) * LEXICAL_SIMILARITY_WEIGHT
+    + _nonlinear_reward(lexical_js, LEXICAL_NONLINEAR_EXPONENT) * LEXICAL_JS_WEIGHT
+)
+cleanliness_penalty = (
+    _nonlinear_reward(garbled_ratio, CLEANLINESS_NONLINEAR_EXPONENT) * GARBLED_REWARD_WEIGHT
+    + _nonlinear_reward(word_noncompliance, CLEANLINESS_NONLINEAR_EXPONENT) * WORD_COMPLIANCE_REWARD_WEIGHT
+)
+soft_reward = quality_component + lexical_component - cleanliness_penalty
+
+reward = base_reward + potential_gain + soft_reward
         next_summary = self._capital.render_text(self._budget)
         self._current_summary = next_summary
         self._cursor += 1
@@ -1580,6 +1740,9 @@ class ArticleEnvironment:
             "budget_remaining": float(self._budget),
             "cumulative_cost": float(self._cumulative_cost),
             "budget_breach": float(budget_breach),
+            "reward_base": float(base_reward),
+            "reward_potential_gain": float(potential_gain),
+            "reward_soft_bonus": float(soft_reward),
             "reward": reward,
         })
         metrics["capital_coverage"] = capital_metrics["coverage"]
@@ -2165,6 +2328,9 @@ class DemoTrainer(Trainer):
             global_step = (round_index - 1) * total_steps + step
             log_metrics: MutableMapping[str, Any] = {
                 "reward": transition.reward,
+                "reward_base": metrics.get("reward_base", 0.0),
+                "reward_potential_gain": metrics.get("reward_potential_gain", 0.0),
+                "reward_soft_bonus": metrics.get("reward_soft_bonus", 0.0),
                 "buffer_size": len(self.agent.replay_buffer),
                 "summary_length": summary_len,
                 "source_length": metrics.get("source_length", float(source_len)),
@@ -2189,6 +2355,9 @@ class DemoTrainer(Trainer):
 
             metric_indent = "           "
             metric_descriptions: list[tuple[str, str, str]] = [
+                ("reward_base", "reward_base", "基础奖励，结合资本价值与预算成本"),
+                ("reward_potential", "reward_potential_gain", "潜在价值增量"),
+                ("reward_soft", "reward_soft_bonus", "摘要质量软奖励"),
                 ("len_ratio", "length_ratio", "摘要长度与信息源比值，偏低会导致覆盖不足"),
                 ("sim", "similarity", "字符级相似度，衡量摘要整体贴近原文的程度"),
                 ("coverage", "coverage_ratio", "覆盖率，统计摘要覆盖原文字符的比例"),
@@ -2233,7 +2402,10 @@ class DemoTrainer(Trainer):
             else:
                 block_color = ANSI_YELLOW
             reward_line = (
-                f"{metric_indent}reward={transition.reward:.3f} （综合奖励，数值越高代表表现越佳；{reward_quality}）"
+                f"{metric_indent}reward={transition.reward:.3f} "
+                f"(base={metrics.get(reward_base, 0.0):+.3f}, "
+                f"potential={metrics.get(reward_potential_gain, 0.0):+.3f}, "
+                f"soft={metrics.get(reward_soft_bonus, 0.0):+.3f}; {reward_quality})"
             )
 
             lines_to_print.append(summary_line)
@@ -2251,6 +2423,9 @@ class DemoTrainer(Trainer):
                 "step": step,
                 "global_step": global_step,
                 "reward": transition.reward,
+                "reward_base": log_metrics.get("reward_base", 0.0),
+                "reward_potential_gain": log_metrics.get("reward_potential_gain", 0.0),
+                "reward_soft_bonus": log_metrics.get("reward_soft_bonus", 0.0),
                 "previous_summary_length": prev_len,
                 "chapter_length": chapter_len,
                 "source_length": source_len,
@@ -2269,6 +2444,17 @@ class DemoTrainer(Trainer):
                 "lexical_cosine": log_metrics.get("lexical_cosine", 0.0),
                 "lexical_js_similarity": log_metrics.get("lexical_js_similarity", 0.0),
                 "lexical_token_count": log_metrics.get("lexical_token_count", 0.0),
+                "capital_value": metrics.get("capital_value", 0.0),
+                "capital_coverage": metrics.get("capital_coverage", 0.0),
+                "capital_diversity": metrics.get("capital_diversity", 0.0),
+                "capital_redundancy": metrics.get("capital_redundancy", 0.0),
+                "capital_verification_ratio": metrics.get("capital_verification_ratio", 0.0),
+                "capital_fact_count": metrics.get("capital_fact_count", 0.0),
+                "capital_operations": metrics.get("capital_operations", 0.0),
+                "operation_cost": metrics.get("operation_cost", 0.0),
+                "budget_remaining": metrics.get("budget_remaining", 0.0),
+                "budget_breach": metrics.get("budget_breach", 0.0),
+                "cumulative_cost": metrics.get("cumulative_cost", 0.0),
             }
             _append_csv_row(STEP_CSV_PATH, STEP_CSV_HEADERS, step_csv_row)
             state = transition.next_state
@@ -2389,6 +2575,81 @@ class DemoTrainer(Trainer):
             print(f"    {line}")
 
 
+
+
+def _normalize_fact_snippet(text: str, max_chars: int = 120) -> str:
+    collapsed = " ".join(text.strip().split())
+    return collapsed[:max_chars]
+
+
+def _extract_candidate_sentences(chapter_text: str, max_sentences: int = 3) -> list[str]:
+    sentences = re.split(r"[。！？!?\.
+]+", chapter_text)
+    candidates: list[str] = []
+    for sentence in sentences:
+        normalized = _normalize_fact_snippet(sentence)
+        if len(normalized) >= 12:
+            candidates.append(normalized)
+        if len(candidates) >= max_sentences:
+            break
+    if not candidates:
+        fallback = _normalize_fact_snippet(chapter_text)
+        if fallback:
+            candidates.append(fallback)
+    return candidates
+
+
+def _build_template_action(chapter_text: str, chapter_index: int) -> str:
+    sentences = _extract_candidate_sentences(chapter_text, max_sentences=3)
+    if not sentences:
+        return ""
+    commands: list[str] = []
+    fact_label = f"CH{chapter_index:02d}"
+    primary = sentences[0]
+    commands.append(f"ACQUIRE {fact_label} {primary}")
+    if len(sentences) > 1:
+        secondary = sentences[1]
+        commands.append(f"VERIFY {fact_label} {secondary}")
+        left = primary[:60]
+        right = secondary[:60]
+        commands.append(f"LINK {left} -> {right}")
+    if len(sentences) > 2:
+        tertiary = sentences[2]
+        commands.append(f"COMMIT {fact_label} {tertiary}")
+    return "
+".join(cmd for cmd in commands if cmd.strip())
+
+
+def _create_text_action(action_text: str, tokenizer: CharTokenizer) -> TextAction:
+    token_ids = tokenizer.encode_action_text(action_text)
+    return TextAction(token_ids=token_ids, text=action_text, length=len(token_ids))
+
+
+def _seed_replay_buffer_with_templates(
+    environment: ArticleEnvironment,
+    replay_buffer: BaseReplayBuffer,
+    tokenizer: CharTokenizer,
+    observations: Sequence[TextObservation],
+    *,
+    max_seed_steps: int = 4,
+) -> list[tuple[str, float]]:
+    if max_seed_steps <= 0:
+        return []
+    seeds: list[tuple[str, float]] = []
+    environment.reset()
+    for index, observation in enumerate(observations[:max_seed_steps], start=1):
+        template_text = _build_template_action(observation.chapter_text, observation.step_index)
+        if not template_text.strip():
+            continue
+        action = _create_text_action(template_text, tokenizer)
+        transition = environment.step(action)
+        replay_buffer.add(transition)
+        seeds.append((template_text, transition.reward))
+        if transition.done:
+            break
+    environment.reset()
+    return seeds
+
 def build_demo_components(
     article_path: Path,
     capacity: int,
@@ -2425,6 +2686,22 @@ def build_demo_components(
         cost_weight=COST_WEIGHT,
     )
     replay_buffer = SimpleReplayBuffer(capacity)
+    seeded_samples = _seed_replay_buffer_with_templates(
+        environment,
+        replay_buffer,
+        tokenizer,
+        observations,
+        max_seed_steps=min(4, len(observations)),
+    )
+    if seeded_samples:
+        _console_log(
+            f"Seeded replay buffer with {len(seeded_samples)} template transitions"
+        )
+        for seed_index, (template_text, reward_value) in enumerate(seeded_samples, start=1):
+            preview = template_text.splitlines()[0][:80]
+            _console_log(
+                f"  Seed {seed_index:02d}: reward={reward_value:.3f} | {preview}"
+            )
     network_factory = DemoNetworkFactory(
         vocab_size=tokenizer.vocab_size,
         embedding_dim=96,
