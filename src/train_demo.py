@@ -66,6 +66,8 @@ STEP_CSV_PATH = OUT_DIR / "step_metrics.csv"
 ROUND_CSV_PATH = OUT_DIR / "round_metrics.csv"
 REWARDS_HTML_PATH = OUT_DIR / "rewards.html"
 ROUND_SNAPSHOT_DIR = OUT_DIR / "round_snapshots"
+STEP_LOG_PATH = OUT_DIR / "training_step.log"
+TRAIN_LOG_PATH = OUT_DIR / "training_output.log"
 
 STEP_CSV_HEADERS = [
     "round",
@@ -140,67 +142,32 @@ LEXICAL_STATS_SUFFIX = "_lexical.json"
 LEXICAL_SIMILARITY_WEIGHT = 0.15
 LEXICAL_JS_WEIGHT = 0.1
 
-COMMON_SUMMARY_PUNCTUATION = {
-    '，',
-    '。',
-    '！',
-    '？',
-    '；',
-    '：',
-    '“',
-    '”',
-    '‘',
-    '’',
-    '（',
-    '）',
-    '《',
-    '》',
-    '、',
-    '·',
-    '—',
-    '–',
-    '…',
-    '【',
-    '】',
-    '『',
-    '』',
-    '「',
-    '」',
-    '<',
-    '>',
-    ',',
-    '.',
-    '!',
-    '?',
-    ';',
-    ':',
-    "'",
-    '"',
-    '-',
-    '(',
-    ')',
-    '[',
-    ']',
-    ' ',
-}
+COMMON_SUMMARY_PUNCTUATION = set(",.!?;:'\"-()[] ")
 DEFAULT_COMPLIANCE_TEMPERATURE = 0.85
-OPERATION_COSTS = {
-    "ACQUIRE": 3.0,
-    "EXTRACT": 3.0,
-    "LINK": 2.0,
-    "VERIFY": 4.0,
-    "HEDGE": 1.5,
-    "TRIM": 1.0,
-    "COMMIT": 5.0,
+COMPLIANCE_INVALID_LOGIT_PENALTY = 12.0
+OPERATION_COSTS: Mapping[str, float] = {
+    'ACQUIRE': 3.0,
+    'EXTRACT': 3.0,
+    'LINK': 2.0,
+    'VERIFY': 4.0,
+    'HEDGE': 1.5,
+    'TRIM': 1.0,
+    'COMMIT': 5.0,
 }
 DEFAULT_OPERATION_COST = 2.0
 DEFAULT_INITIAL_BUDGET = 120.0
+COST_WEIGHT = 0.08
 COST_WEIGHT = 0.08
 BUDGET_PENALTY_WEIGHT = 0.02
 CAPITAL_COVERAGE_WEIGHT = 1.5
 CAPITAL_DIVERSITY_WEIGHT = 0.8
 CAPITAL_REDUNDANCY_WEIGHT = 0.6
 CAPITAL_VERIFICATION_BONUS = 0.4
+
+ANSI_GREEN = "[32m"
+ANSI_RED = "[31m"
+ANSI_YELLOW = "[33m"
+ANSI_RESET = "[0m"
 
 
 class TorchUnavailableError(RuntimeError):
@@ -924,8 +891,8 @@ def _append_csv_row(path: Path, headers: Sequence[str], row: Mapping[str, Any]) 
 def _reset_output_artifacts() -> None:
     """Remove stale CSV/HTML/snapshot artifacts before a new training session."""
 
-    OUT_DIR.mkdir(exist_ok=True)
-    for path in (STEP_CSV_PATH, ROUND_CSV_PATH, REWARDS_HTML_PATH):
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for path in (STEP_CSV_PATH, ROUND_CSV_PATH, REWARDS_HTML_PATH, STEP_LOG_PATH, TRAIN_LOG_PATH):
         if path.exists():
             path.unlink()
     if ROUND_SNAPSHOT_DIR.exists():
@@ -972,6 +939,38 @@ def _parse_int(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
 
+
+
+ANSI_REWARD_TAGS = {
+    ANSI_GREEN: "[reward>0]",
+    ANSI_RED: "[reward<0]",
+    ANSI_YELLOW: "[reward=0]",
+}
+
+
+def _append_step_log(lines: Sequence[str], block_color: str) -> None:
+    if not lines:
+        return
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    STEP_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tag = ANSI_REWARD_TAGS.get(block_color, "[reward] ")
+    with STEP_LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(f"{tag}\n")
+        for raw in lines:
+            handle.write(f"{raw}\n")
+        handle.write("\n")
+
+def _console_log(message: str, *, color: str | None = None, log: bool = True) -> None:
+    if color:
+        print(f"{color}{message}{ANSI_RESET}")
+    else:
+        print(message)
+    if log:
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        TRAIN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with TRAIN_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(f"{message}
+")
 
 def _build_rewards_dashboard_html(
     step_rows: Sequence[Mapping[str, Any]],
@@ -2132,19 +2131,26 @@ class DemoTrainer(Trainer):
                 state.previous_summary, state.chapter_text
             )
             source_len, source_preview = _format_text_debug(source_text, 20, 20)
-            print(
+            block_color = ANSI_YELLOW
+            def _colorize(line: str) -> str:
+                return f"{block_color}{line}{ANSI_RESET}"
+
+            lines_to_print: list[str] = []
+            lines_to_print.append(
                 f"  Step {step:02d} | prev_summary={prev_len:04d} chars \"{prev_preview}\""
             )
-            print(
+            lines_to_print.append(
                 f"           | chapter={chapter_len:04d} chars \"{chapter_preview}\""
             )
-            print(
+            lines_to_print.append(
                 f"           | source={source_len:04d} chars \"{source_preview}\""
             )
+
             action = self.agent.act(state)
             transition = self.environment.step(action)
             self.agent.record(transition)
             metrics = self.environment.last_metrics
+
             summary_len, summary_preview = _format_text_debug(action.text, 20, 20)
             total_reward += transition.reward
             global_step = (round_index - 1) * total_steps + step
@@ -2168,9 +2174,10 @@ class DemoTrainer(Trainer):
                 "lexical_js_similarity": metrics.get("lexical_js_similarity", 0.0),
                 "lexical_token_count": metrics.get("lexical_token_count", 0.0),
             }
-            print(
+            summary_line = (
                 f"           -> summary={summary_len:04d} chars \"{summary_preview}\""
             )
+
             metric_indent = "           "
             metric_descriptions: list[tuple[str, str, str]] = [
                 ("len_ratio", "length_ratio", "摘要长度与信息源比值，偏低会导致覆盖不足"),
@@ -2188,10 +2195,14 @@ class DemoTrainer(Trainer):
                 ("cap_ver", "capital_verification_ratio", "验证比例，越高越可靠"),
                 ("budget", "budget_remaining", "剩余预算，反映资源消耗进度"),
             ]
+            metric_lines: list[str] = []
             for label, key, description in metric_descriptions:
                 value = float(log_metrics.get(key, 0.0))
                 quality = _describe_metric_quality(key, value)
-                print(f"{metric_indent}{label}={value:.3f} （{description}；{quality}）")
+                metric_lines.append(
+                    f"{metric_indent}{label}={value:.3f} （{description}；{quality}）"
+                )
+
             garbled_penalty = float(log_metrics["garbled_penalty"])
             word_penalty = float(log_metrics["word_penalty"])
             penalty_quality = "；".join(
@@ -2200,14 +2211,30 @@ class DemoTrainer(Trainer):
                     _describe_penalty_component(word_penalty, "词合规惩罚"),
                 ]
             )
-            print(
+            penalty_line = (
                 f"{metric_indent}penalties={garbled_penalty:.3f}/{word_penalty:.3f} "
                 f"（乱码与词合规惩罚项，越高惩罚越重；{penalty_quality}）"
             )
+
             reward_quality = _describe_reward_quality(transition.reward)
-            print(
+            if transition.reward > 1e-6:
+                block_color = ANSI_GREEN
+            elif transition.reward < -1e-6:
+                block_color = ANSI_RED
+            else:
+                block_color = ANSI_YELLOW
+            reward_line = (
                 f"{metric_indent}reward={transition.reward:.3f} （综合奖励，数值越高代表表现越佳；{reward_quality}）"
             )
+
+            lines_to_print.append(summary_line)
+            lines_to_print.extend(metric_lines)
+            lines_to_print.append(penalty_line)
+            lines_to_print.append(reward_line)
+            _append_step_log(lines_to_print, block_color)
+            for stored_line in lines_to_print:
+                _console_log(stored_line, color=block_color)
+
             if log_metrics:
                 self.log(log_metrics, global_step)
             step_csv_row = {
@@ -2518,11 +2545,11 @@ def main() -> None:
         )
     article_text = article_path.read_text(encoding="utf-8")
     total_length, preview = _format_text_debug(article_text, 40, 40)
-    print(
+    _console_log(
         "Loaded article debug info: "
         f"chars={total_length} preview=\"{preview}\""
     )
-    print("Chapter statistics:")
+    _console_log("Chapter statistics:")
     for observation in observations:
         char_length, interval_preview = _format_text_debug(observation.chapter_text, 30, 30)
         print(
@@ -2541,7 +2568,7 @@ def main() -> None:
         trainer.config.updates_per_round = max(0, args.post_round_updates)
     if trainer.config.updates_per_round <= 0:
         trainer.config.updates_per_round = trainer.config.total_steps
-    print(
+    _console_log(
         "Configured schedule: "
         f"steps_per_round={trainer.config.total_steps} "
         f"post_round_updates={trainer.config.updates_per_round}"
@@ -2558,11 +2585,11 @@ def main() -> None:
             f"{REWARDS_HTML_PATH.relative_to(REPO_ROOT)}"
         )
     else:
-        print("No step metrics recorded; skipping reward dashboard export.")
+        _console_log("No step metrics recorded; skipping reward dashboard export.")
 
-    print("Final iterative summary (deterministic policy output):")
+    _console_log("Final iterative summary (deterministic policy output):")
     for line in trainer.render_iterative_summary():
-        print(f"  {line}")
+        _console_log(f"  {line}")
 
     snapshot_path = OUT_DIR / "demo_agent_snapshot.json"
     snapshot_metadata = {
@@ -2572,11 +2599,11 @@ def main() -> None:
         "replay_capacity": args.replay_capacity,
     }
     snapshot = save_agent_snapshot(agent, snapshot_metadata, snapshot_path)
-    print(f"Saved demo agent snapshot to {snapshot_path.relative_to(REPO_ROOT)}")
+    _console_log(f"Saved demo agent snapshot to {snapshot_path.relative_to(REPO_ROOT)}")
 
     model_path = OUT_DIR / "demo_agent_model.bin"
     save_model_artifact(model_path, snapshot["model_size_bytes"])
-    print(
+    _console_log(
         "Saved demo agent model to "
         f"{model_path.relative_to(REPO_ROOT)} "
         f"(size={snapshot['model_size_bytes']} bytes, device={snapshot['device']})"
