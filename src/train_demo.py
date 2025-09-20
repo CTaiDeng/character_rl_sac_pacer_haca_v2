@@ -61,6 +61,8 @@ OUT_DIR = REPO_ROOT / "out"
 COMPUTE_TFIDF_SCRIPT = REPO_ROOT / "scripts" / "compute_chapter_tfidf.py"
 STEP_CSV_PATH = OUT_DIR / "step_metrics.csv"
 ROUND_CSV_PATH = OUT_DIR / "round_metrics.csv"
+REWARDS_HTML_PATH = OUT_DIR / "rewards.html"
+ROUND_SNAPSHOT_DIR = OUT_DIR / "round_snapshots"
 
 STEP_CSV_HEADERS = [
     "round",
@@ -511,6 +513,252 @@ def _append_csv_row(path: Path, headers: Sequence[str], row: Mapping[str, Any]) 
             writer.writeheader()
         writer.writerow({key: row.get(key, "") for key in headers})
         handle.flush()
+
+
+def _reset_output_artifacts() -> None:
+    """Remove stale CSV/HTML/snapshot artifacts before a new training session."""
+
+    OUT_DIR.mkdir(exist_ok=True)
+    for path in (STEP_CSV_PATH, ROUND_CSV_PATH, REWARDS_HTML_PATH):
+        if path.exists():
+            path.unlink()
+    if ROUND_SNAPSHOT_DIR.exists():
+        for snapshot in ROUND_SNAPSHOT_DIR.glob("*.json"):
+            if snapshot.is_file():
+                snapshot.unlink()
+    ROUND_SNAPSHOT_DIR.mkdir(exist_ok=True)
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    """Load ``path`` into a list of dictionaries; return an empty list if missing."""
+
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        return [dict(row) for row in reader]
+
+
+def _parse_float(value: Any) -> float:
+    try:
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip()
+        if not text:
+            return 0.0
+        return float(text)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _parse_int(value: Any) -> int:
+    try:
+        if value is None:
+            return 0
+        if isinstance(value, int):
+            return value
+        text = str(value).strip()
+        if not text:
+            return 0
+        return int(float(text))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _build_rewards_dashboard_html(
+    step_rows: Sequence[Mapping[str, Any]],
+    round_rows: Sequence[Mapping[str, Any]],
+) -> str:
+    """Construct a standalone HTML dashboard summarizing reward trends."""
+
+    step_data = [
+        {
+            "round": _parse_int(row.get("round")),
+            "step": _parse_int(row.get("step")),
+            "global_step": _parse_int(row.get("global_step")),
+            "reward": _parse_float(row.get("reward")),
+        }
+        for row in step_rows
+    ]
+    round_data = [
+        {
+            "round": _parse_int(row.get("round")),
+            "steps": _parse_int(row.get("steps")),
+            "total_reward": _parse_float(row.get("total_reward")),
+            "average_reward": _parse_float(row.get("average_reward")),
+        }
+        for row in round_rows
+    ]
+    summary_text: str
+    if round_data:
+        latest = round_data[-1]
+        summary_text = (
+            "已记录 {count} 轮训练；最近一轮 (Round {round}) 总奖励 {total:.3f}，"
+            "平均奖励 {average:.3f}。"
+        ).format(
+            count=len(round_data),
+            round=latest["round"],
+            total=latest["total_reward"],
+            average=latest["average_reward"],
+        )
+    else:
+        summary_text = "尚未记录任何轮次汇总数据。"
+    step_json = json.dumps(step_data, ensure_ascii=False)
+    round_json = json.dumps(round_data, ensure_ascii=False)
+    return f"""<!DOCTYPE html>
+<html lang=\"zh-CN\">
+  <head>
+    <meta charset=\"utf-8\" />
+    <title>训练奖励概览</title>
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <style>
+      body {{
+        font-family: \"Segoe UI\", \"Helvetica Neue\", Arial, \"PingFang SC\", sans-serif;
+        margin: 2rem;
+        background: #f7f7f7;
+        color: #222;
+      }}
+      h1 {{
+        margin-bottom: 0.5rem;
+      }}
+      p.description {{
+        margin-top: 0;
+        color: #555;
+      }}
+      p.summary {{
+        color: #333;
+      }}
+      .chart-wrapper {{
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }}
+      canvas {{
+        max-width: 100%;
+      }}
+      #status {{
+        margin-bottom: 1rem;
+        color: #d9534f;
+      }}
+    </style>
+    <script src=\"https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js\"></script>
+  </head>
+  <body>
+    <h1>训练奖励概览</h1>
+    <p class=\"description\">本页面基于最新导出的 CSV 快照自动生成。</p>
+    <p class=\"summary\">{summary_text}</p>
+    <div id=\"status\"></div>
+    <div class=\"chart-wrapper\">
+      <h2>Step 奖励走势</h2>
+      <canvas id=\"stepChart\" height=\"320\"></canvas>
+    </div>
+    <div class=\"chart-wrapper\">
+      <h2>轮次总奖励</h2>
+      <canvas id=\"roundChart\" height=\"320\"></canvas>
+    </div>
+    <script>
+      const stepData = {step_json};
+      const roundData = {round_json};
+
+      function renderDashboard() {{
+        const status = document.getElementById('status');
+        if (stepData.length === 0) {{
+          status.textContent = '未找到 Step 指标数据，请确认训练是否成功写入 CSV。';
+          document.querySelectorAll('.chart-wrapper').forEach((wrapper) => {{
+            wrapper.style.display = 'none';
+          }});
+          return;
+        }}
+        status.textContent = '';
+        const stepCtx = document.getElementById('stepChart').getContext('2d');
+        new Chart(stepCtx, {{
+          type: 'line',
+          data: {{
+            labels: stepData.map((item) => item.global_step),
+            datasets: [{{
+              label: 'Step Reward',
+              data: stepData.map((item) => item.reward),
+              borderColor: '#007bff',
+              backgroundColor: 'rgba(0, 123, 255, 0.12)',
+              fill: true,
+              tension: 0.2,
+              pointRadius: 0,
+            }}],
+          }},
+          options: {{
+            responsive: true,
+            interaction: {{ mode: 'index', intersect: false }},
+            scales: {{
+              x: {{ title: {{ display: true, text: 'Global Step' }} }},
+              y: {{ title: {{ display: true, text: 'Reward' }} }},
+            }},
+          }},
+        }});
+
+        if (roundData.length === 0) {{
+          document.getElementById('roundChart').closest('.chart-wrapper').style.display = 'none';
+          return;
+        }}
+
+        const roundCtx = document.getElementById('roundChart').getContext('2d');
+        new Chart(roundCtx, {{
+          type: 'bar',
+          data: {{
+            labels: roundData.map((item) => `Round ${{item.round}}`),
+            datasets: [{{
+              label: 'Total Reward',
+              data: roundData.map((item) => item.total_reward),
+              backgroundColor: 'rgba(255, 159, 64, 0.6)',
+              borderColor: '#ff9f40',
+            }}],
+          }},
+          options: {{
+            responsive: true,
+            scales: {{
+              x: {{ title: {{ display: true, text: 'Round' }} }},
+              y: {{ title: {{ display: true, text: 'Total Reward' }} }},
+            }},
+          }},
+        }});
+      }}
+
+      renderDashboard();
+    </script>
+  </body>
+</html>
+"""
+
+
+def _write_rewards_dashboard(
+    step_rows: Sequence[Mapping[str, Any]],
+    round_rows: Sequence[Mapping[str, Any]],
+) -> None:
+    """Persist ``rewards.html`` reflecting the current CSV contents."""
+
+    html_content = _build_rewards_dashboard_html(step_rows, round_rows)
+    REWARDS_HTML_PATH.parent.mkdir(exist_ok=True)
+    with REWARDS_HTML_PATH.open("w", encoding="utf-8") as handle:
+        handle.write(html_content)
+
+
+def save_agent_snapshot(
+    agent: "DemoSACAgent",
+    metadata: Mapping[str, Any],
+    path: Path,
+) -> MutableMapping[str, Any]:
+    """Serialize ``agent`` state alongside ``metadata`` to ``path``."""
+
+    agent_state: MutableMapping[str, Any] = {}
+    agent.save(agent_state)
+    payload = {"agent_state": agent_state, "metadata": dict(metadata)}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, ensure_ascii=False)
+    return agent_state
 
 
 def _compute_garbled_statistics(
@@ -1493,6 +1741,23 @@ class DemoTrainer(Trainer):
                     "average_reward": round_total / steps_completed if steps_completed else 0.0,
                 }
                 _append_csv_row(ROUND_CSV_PATH, ROUND_CSV_HEADERS, round_csv_row)
+                snapshot_metadata = {
+                    "round": round_index,
+                    "steps_completed": steps_completed,
+                    "total_reward": round_total,
+                    "average_reward": round_csv_row["average_reward"],
+                    "global_step": global_step,
+                    "replay_buffer_size": len(self.agent.replay_buffer),
+                    "updates_per_round": self.config.updates_per_round,
+                }
+                snapshot_path = ROUND_SNAPSHOT_DIR / (
+                    f"demo_agent_snapshot_round_{round_index:04d}.json"
+                )
+                save_agent_snapshot(self.agent, snapshot_metadata, snapshot_path)
+                print(
+                    "           "
+                    f"Saved round snapshot to {snapshot_path.relative_to(REPO_ROOT)}"
+                )
                 total_reward = 0.0
                 state = self.environment.reset()
         if (
@@ -1710,6 +1975,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    _reset_output_artifacts()
     article_path = REPO_ROOT / "data" / "sample_article.txt"
     lexical_stats, lexical_tokenizer = _ensure_lexical_statistics(
         article_path, recompute=args.recompute_lexical_cache
@@ -1764,29 +2030,29 @@ def main() -> None:
     for round_index in range(1, max(1, args.rounds) + 1):
         trainer.run(round_index=round_index)
 
+    step_rows = _read_csv_rows(STEP_CSV_PATH)
+    round_rows = _read_csv_rows(ROUND_CSV_PATH)
+    if step_rows:
+        _write_rewards_dashboard(step_rows, round_rows)
+        print(
+            "Exported reward dashboard to "
+            f"{REWARDS_HTML_PATH.relative_to(REPO_ROOT)}"
+        )
+    else:
+        print("No step metrics recorded; skipping reward dashboard export.")
+
     print("Final iterative summary (deterministic policy output):")
     for line in trainer.render_iterative_summary():
         print(f"  {line}")
 
-    snapshot: MutableMapping[str, Any] = {}
-    agent.save(snapshot)
-    OUT_DIR.mkdir(exist_ok=True)
     snapshot_path = OUT_DIR / "demo_agent_snapshot.json"
-    with snapshot_path.open("w", encoding="utf-8") as fh:
-        json.dump(
-            {
-                "agent_state": snapshot,
-                "metadata": {
-                    "steps_per_round": trainer.config.total_steps,
-                    "post_round_updates": trainer.config.updates_per_round,
-                    "rounds": max(1, args.rounds),
-                    "replay_capacity": args.replay_capacity,
-                },
-            },
-            fh,
-            indent=2,
-            ensure_ascii=False,
-        )
+    snapshot_metadata = {
+        "steps_per_round": trainer.config.total_steps,
+        "post_round_updates": trainer.config.updates_per_round,
+        "rounds": max(1, args.rounds),
+        "replay_capacity": args.replay_capacity,
+    }
+    snapshot = save_agent_snapshot(agent, snapshot_metadata, snapshot_path)
     print(f"Saved demo agent snapshot to {snapshot_path.relative_to(REPO_ROOT)}")
 
     model_path = OUT_DIR / "demo_agent_model.bin"

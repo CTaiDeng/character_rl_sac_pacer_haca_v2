@@ -143,7 +143,9 @@ Actual numbers vary because the demo samples synthetic actions stochastically, b
 
 ### Saved artifacts
 
-After the log finishes, the script 序列化一个模型快照到 `out/demo_agent_snapshot.json`，其中包含演示代理的占位符状态与运行元数据（如训练步数、经验回放容量）。该代理始终在 CPU 上训练，并记录策略头部的参数数量，同时标注导出的模型体积。为了满足新的存档协议，脚本会在 `out/demo_agent_model.bin` 写出一个精确 199 MB（209,460,851 字节）的二进制模型文件，用以模拟重量级微型 LLM 头部的交付物。所有产物会自动创建父目录 `out/`，便于在多阶段流程中复用或进一步加工演示产出的检查点。
+After the log finishes, the script 会首先清理旧的 CSV/HTML 产物，并将新的训练记录写入 `out/step_metrics.csv` 与 `out/round_metrics.csv`。随后，程序会基于 CSV 自动生成一份自包含的奖励仪表盘 `out/rewards.html`，无需额外服务器即可在浏览器中查看 Step 奖励走势与轮次汇总。
+
+训练过程中，每轮结束后都会即时导出一份模型快照到 `out/round_snapshots/demo_agent_snapshot_round_XXXX.json`（`XXXX` 为四位轮次编号）。这些文件包含该轮次完成时的奖励统计、经验回放大小等元信息，方便在长时间训练中追踪中间状态。最终在所有轮次结束后，脚本仍会把完整的代理状态保存到 `out/demo_agent_snapshot.json`，并生成一份精确 199 MB（209,460,851 字节）的模型占位文件 `out/demo_agent_model.bin`。所有产物自动落盘到 `out/` 目录，便于后续流程复用或进一步加工演示产出的检查点。
 
 ### CSV 导出与可视化
 
@@ -152,4 +154,4 @@ After the log finishes, the script 序列化一个模型快照到 `out/demo_agen
 * `out/step_metrics.csv`：逐 step 的奖励与质量指标。字段包含轮次 (`round`)、局部 step 序号 (`step`)、全局 step (`global_step`)、即时奖励 (`reward`)、上一轮摘要长度 (`previous_summary_length`)、当前章节长度 (`chapter_length`)、拼接源文本长度 (`source_length`)、摘要长度 (`summary_length`)，以及基于该拼接文本计算的语义相似度、覆盖率、新颖度、乱码惩罚、词语合规惩罚等诊断数据。
 * `out/round_metrics.csv`：每轮训练完成时的汇总分数，记录当轮 step 数 (`steps`)、总奖励 (`total_reward`) 与平均奖励 (`average_reward`)。
 
-仓库同时提供 `visualizations/training_metrics.html`，可通过浏览器读取上述 CSV 并基于 Chart.js 绘制折线/柱状图。推荐在仓库根目录执行 `python -m http.server` 后，访问 `http://localhost:8000/visualizations/training_metrics.html`，即可看到 Step 与 Round 奖励的走势；若 CSV 文件缺失或为空，页面会给出相应提示。
+仓库同时提供 `visualizations/training_metrics.html`，可通过浏览器读取上述 CSV 并基于 Chart.js 绘制折线/柱状图。推荐在仓库根目录执行 `python -m http.server` 后，访问 `http://localhost:8000/visualizations/training_metrics.html`，即可看到 Step 与 Round 奖励的走势；若 CSV 文件缺失或为空，页面会给出相应提示。若想脱离静态服务器快速查看结果，也可以直接打开自动生成的 `out/rewards.html`，该文件已经内嵌 Chart.js 并包含最新奖励摘要。
