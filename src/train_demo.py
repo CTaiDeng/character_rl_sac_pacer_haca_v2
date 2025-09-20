@@ -2577,12 +2577,13 @@ class DemoTrainer(Trainer):
 
 
 
+
+
 def _normalize_fact_snippet(text: str, max_chars: int = 120) -> str:
     collapsed = " ".join(text.strip().split())
     return collapsed[:max_chars]
 
 
-def _extract_candidate_sentences(chapter_text: str, max_sentences: int = 3) -> list[str]:
 def _extract_candidate_sentences(chapter_text: str, max_sentences: int = 3) -> list[str]:
     sentences = re.split(r"[。！？!?\.]+|
 +", chapter_text)
@@ -2621,6 +2622,38 @@ def _build_template_action(chapter_text: str, chapter_index: int) -> str:
 ".join(cmd for cmd in commands if cmd.strip())
 
 
+def _create_text_action(action_text: str, tokenizer: CharTokenizer) -> TextAction:
+    token_ids = tokenizer.encode_action_text(action_text)
+    return TextAction(token_ids=token_ids, text=action_text, length=len(token_ids))
+def _create_text_action(action_text: str, tokenizer: CharTokenizer) -> TextAction:
+    token_ids = tokenizer.encode_action_text(action_text)
+    return TextAction(token_ids=token_ids, text=action_text, length=len(token_ids))
+
+
+def _seed_replay_buffer_with_templates(
+    environment: ArticleEnvironment,
+    replay_buffer: BaseReplayBuffer,
+    tokenizer: CharTokenizer,
+    observations: Sequence[TextObservation],
+    *,
+    max_seed_steps: int = 4,
+) -> list[tuple[str, float]]:
+    if max_seed_steps <= 0:
+        return []
+    seeds: list[tuple[str, float]] = []
+    environment.reset()
+    for index, observation in enumerate(observations[:max_seed_steps], start=1):
+        template_text = _build_template_action(observation.chapter_text, observation.step_index)
+        if not template_text.strip():
+            continue
+        action = _create_text_action(template_text, tokenizer)
+        transition = environment.step(action)
+        replay_buffer.add(transition)
+        seeds.append((template_text, transition.reward))
+        if transition.done:
+            break
+    environment.reset()
+    return seeds
 def _create_text_action(action_text: str, tokenizer: CharTokenizer) -> TextAction:
     token_ids = tokenizer.encode_action_text(action_text)
     return TextAction(token_ids=token_ids, text=action_text, length=len(token_ids))
