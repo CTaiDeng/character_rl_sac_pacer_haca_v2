@@ -12,16 +12,30 @@
 - **乱码比例 $\mathrm{garb}(s)$**：统计摘要中 `<unk>`、不可打印字符以及不在 `CharTokenizer` 字符集内的字符占比。计算时会将 `<unk>` 子串整体视作乱码，并排除换行、制表符等允许的控制字符。
 - **词合规缺失率 $\mathrm{word\_nc}(s)$**：基于全部章节提取连续汉字 bigram 构成的词表，统计摘要中任一未出现过的汉字 bigram 或全新汉字占摘要全部汉字的比例，用于识别被随意拼接的词语或语序混乱的组合。
 
-最终奖励 $R(s, x)$ 将上述质量项与乱码惩罚结合：
+为了实现“只要表现稍有起色就给予重度奖励”的目标，所有指标都会先通过非线性放大奖励函数
 \[
-R(s, x) = 0.6 \cdot \mathrm{sim}(s, x) + 0.3 \cdot \mathrm{cov}(s, x) + 0.1 \cdot \mathrm{nov}(s, x) + 0.15 \cdot \mathrm{lex\_cos}(s, c) + 0.1 \cdot \mathrm{lex\_js}(s, c) - 0.5 \cdot \mathrm{garb}(s) - 0.7 \cdot \mathrm{word\_nc}(s).
+\phi(z; \alpha) = 1 - (1 - \operatorname{clip}(z, 0, 1))^{\alpha}
+\]
+再与各自权重相乘。$\operatorname{clip}(z, 0, 1)$ 表示把输入限制在 $[0,1]$ 区间。字符级指标（相似度、覆盖率、新颖度）使用 $\alpha = 4$，词汇指标（TF-IDF 余弦、Jensen-Shannon 相似度）使用 $\alpha = 3.5$。对过去的“惩罚项”改为奖励干净输出：先取“清洁度”$c = 1 - \operatorname{clip}(\mathrm{garb}(s), 0, 1)$ 与 $c' = 1 - \operatorname{clip}(\mathrm{word\_nc}(s), 0, 1)$，再套用指数 $\beta = 5$ 的同款放大函数。
+
+因此最终奖励 $R(s, x)$ 为：
+\[
+\begin{aligned}
+R(s, x) ={}& 0.6 \cdot \phi(\mathrm{sim}(s, x); 4) + 0.3 \cdot \phi(\mathrm{cov}(s, x); 4) + 0.1 \cdot \phi(\mathrm{nov}(s, x); 4)\\
+&{}+ 0.15 \cdot \phi(\mathrm{lex\_cos}(s, c); 3.5) + 0.1 \cdot \phi(\mathrm{lex\_js}(s, c); 3.5)\\
+&{}+ 0.5 \cdot \phi(1 - \mathrm{garb}(s); 5) + 0.7 \cdot \phi(1 - \mathrm{word\_nc}(s); 5).
+\end{aligned}
 \]
 
-前三个正向权重反映了我们优先追求整体语义相似和信息覆盖，同时对保持一定的新颖度给予次要奖励；两个负号项则针对编码质量与汉字组合进行约束：只要摘要里含有乱码或词语组合未在原文中出现，就会按照比例扣分，以此鼓励策略输出干净、语义连贯的中文句子。
+前三个正向项仍旧反映语义贴合度和信息覆盖的重要性，只是通过 $\phi$ 使得“略高于平均”的表现获得指数式奖励；词汇相关项帮助模型快速对齐关键词和词频结构。后两个“清洁奖励”保证只要摘要几乎没有乱码或不合规词语，就能立刻拿到大额奖励，而不是被线性扣分。
 
 ## 伪代码
 
 ```pseudo
+function phi(value, exponent):
+    clamped = clamp(value, 0, 1)
+    return 1 - (1 - clamped) ** exponent
+
 function compute_step_reward(summary_text, previous_summary, chapter_text, chapter_index, tokenizer, word_checker, lexical_stats, lexical_tokenizer):
     source_text = concatenate(previous_summary, "\n", chapter_text)  # 若任一为空则直接使用另一个
     matcher = SequenceMatcher(summary_text, source_text)
@@ -52,14 +66,22 @@ function compute_step_reward(summary_text, previous_summary, chapter_text, chapt
     lexical_cosine = compute_lexical_cosine(summary_text, chapter_index, lexical_stats, lexical_tokenizer)
     lexical_js = compute_lexical_js(summary_text, chapter_index, lexical_stats, lexical_tokenizer)
 
+    similarity_reward = 0.6 * phi(similarity, 4)
+    coverage_reward = 0.3 * phi(coverage, 4)
+    novelty_reward = 0.1 * phi(novelty, 4)
+    lexical_cos_reward = 0.15 * phi(lexical_cosine, 3.5)
+    lexical_js_reward = 0.1 * phi(lexical_js, 3.5)
+    garbled_reward = 0.5 * phi(1 - garbled_ratio, 5)
+    word_clean_reward = 0.7 * phi(1 - word_nc_ratio, 5)
+
     reward = (
-        0.6 * similarity
-        + 0.3 * coverage
-        + 0.1 * novelty
-        + 0.15 * lexical_cosine
-        + 0.1 * lexical_js
-        - 0.5 * garbled_ratio
-        - 0.7 * word_nc_ratio
+        similarity_reward
+        + coverage_reward
+        + novelty_reward
+        + lexical_cos_reward
+        + lexical_js_reward
+        + garbled_reward
+        + word_clean_reward
     )
     return reward, {
         "similarity": similarity,

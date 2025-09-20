@@ -133,7 +133,7 @@ Configured schedule: steps_per_round=76 post_round_updates=76
            garbled=0.000 （乱码比率，非法或不可打印字符占比；本次无明显乱码）
            word_nc=0.000 （词合规缺失率，识别异常汉字或未见过的双字组合；本次词语合规性完全正常）
            penalties=0.000/0.000 （乱码与词合规惩罚项，越高惩罚越重；乱码惩罚几乎为零；词合规惩罚几乎为零）
-           reward=1.020 （综合奖励，负值说明当前摘要受到惩罚多于鼓励；本次获得显著正向反馈）
+          reward=1.020 （综合奖励，数值越高代表表现越佳；本次获得显著正向反馈）
 ...
     Update 076 | policy_loss=-0.1234 q1_loss=0.5678 q2_loss=0.9123 avg_reward=-0.4321
     Post-round metric averages | policy_loss=-0.2345 q1_loss=0.4567 q2_loss=0.8910 average_reward=-0.3210

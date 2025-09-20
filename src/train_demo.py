@@ -96,8 +96,11 @@ ARTICLE_SEGMENT_SEPARATOR = "[--------------------------------------------------
 QUALITY_SIMILARITY_WEIGHT = 0.6
 QUALITY_COVERAGE_WEIGHT = 0.3
 QUALITY_NOVELTY_WEIGHT = 0.1
-GARBLED_PENALTY_WEIGHT = 0.5
-WORD_NONCOMPLIANCE_WEIGHT = 0.7
+QUALITY_NONLINEAR_EXPONENT = 4.0
+LEXICAL_NONLINEAR_EXPONENT = 3.5
+GARBLED_REWARD_WEIGHT = 0.5
+WORD_COMPLIANCE_REWARD_WEIGHT = 0.7
+CLEANLINESS_NONLINEAR_EXPONENT = 5.0
 CONTROL_CHAR_WHITELIST = {"\n", "\r", "\t"}
 
 LEXICAL_STATS_SUFFIX = "_lexical.json"
@@ -395,15 +398,40 @@ def _describe_reward_quality(value: float) -> str:
 
     if math.isnan(value):
         return "奖励缺失"
-    if value > 0.8:
+    if value >= 1.8:
+        return "本次获得爆发式奖励"
+    if value >= 1.2:
         return "本次获得显著正向反馈"
+    if value > 0.6:
+        return "本次获得中等奖励"
     if value > 0.0:
-        return "本次获得轻度正向反馈"
-    if value == 0.0:
-        return "本次奖惩持平"
-    if value > -0.5:
-        return "本次受到轻微惩罚"
-    return "本次受到严重惩罚"
+        return "本次获得轻度奖励"
+    return "本次未获得奖励"
+
+
+def _clamp_unit_interval(value: float) -> float:
+    """Clamp ``value`` to the inclusive range ``[0, 1]``."""
+
+    if math.isnan(value):
+        return 0.0
+    if value <= 0.0:
+        return 0.0
+    if value >= 1.0:
+        return 1.0
+    return value
+
+
+def _nonlinear_reward(value: float, exponent: float) -> float:
+    """Amplify ``value`` via ``1 - (1 - value)^exponent`` for heavy rewards."""
+
+    if exponent <= 0:
+        raise ValueError("exponent must be positive for nonlinear reward shaping")
+    base = _clamp_unit_interval(value)
+    if base == 0.0:
+        return 0.0
+    if base == 1.0:
+        return 1.0
+    return 1.0 - math.pow(1.0 - base, exponent)
 
 
 def _append_csv_row(path: Path, headers: Sequence[str], row: Mapping[str, Any]) -> None:
@@ -763,14 +791,37 @@ class ArticleEnvironment:
             lexical_stats=self._lexical_statistics,
             lexical_tokenizer=self._lexical_tokenizer,
         )
+        similarity_reward = QUALITY_SIMILARITY_WEIGHT * _nonlinear_reward(
+            metrics["similarity"], QUALITY_NONLINEAR_EXPONENT
+        )
+        coverage_reward = QUALITY_COVERAGE_WEIGHT * _nonlinear_reward(
+            metrics["coverage_ratio"], QUALITY_NONLINEAR_EXPONENT
+        )
+        novelty_reward = QUALITY_NOVELTY_WEIGHT * _nonlinear_reward(
+            metrics["novelty_ratio"], QUALITY_NONLINEAR_EXPONENT
+        )
+        lexical_reward = LEXICAL_SIMILARITY_WEIGHT * _nonlinear_reward(
+            metrics["lexical_cosine"], LEXICAL_NONLINEAR_EXPONENT
+        )
+        lexical_js_reward = LEXICAL_JS_WEIGHT * _nonlinear_reward(
+            metrics["lexical_js_similarity"], LEXICAL_NONLINEAR_EXPONENT
+        )
+        garbled_cleanliness = 1.0 - _clamp_unit_interval(metrics["garbled_penalty"])
+        garbled_reward = GARBLED_REWARD_WEIGHT * _nonlinear_reward(
+            garbled_cleanliness, CLEANLINESS_NONLINEAR_EXPONENT
+        )
+        word_cleanliness = 1.0 - _clamp_unit_interval(metrics["word_penalty"])
+        word_reward = WORD_COMPLIANCE_REWARD_WEIGHT * _nonlinear_reward(
+            word_cleanliness, CLEANLINESS_NONLINEAR_EXPONENT
+        )
         reward = (
-            QUALITY_SIMILARITY_WEIGHT * metrics["similarity"]
-            + QUALITY_COVERAGE_WEIGHT * metrics["coverage_ratio"]
-            + QUALITY_NOVELTY_WEIGHT * metrics["novelty_ratio"]
-            + LEXICAL_SIMILARITY_WEIGHT * metrics["lexical_cosine"]
-            + LEXICAL_JS_WEIGHT * metrics["lexical_js_similarity"]
-            - GARBLED_PENALTY_WEIGHT * metrics["garbled_penalty"]
-            - WORD_NONCOMPLIANCE_WEIGHT * metrics["word_penalty"]
+            similarity_reward
+            + coverage_reward
+            + novelty_reward
+            + lexical_reward
+            + lexical_js_reward
+            + garbled_reward
+            + word_reward
         )
         metrics["reward"] = reward
         metrics["source_length"] = float(len(source_text))
@@ -1328,7 +1379,7 @@ class DemoTrainer(Trainer):
             )
             reward_quality = _describe_reward_quality(transition.reward)
             print(
-                f"{metric_indent}reward={transition.reward:.3f} （综合奖励，负值说明当前摘要受到惩罚多于鼓励；{reward_quality}）"
+                f"{metric_indent}reward={transition.reward:.3f} （综合奖励，数值越高代表表现越佳；{reward_quality}）"
             )
             if log_metrics:
                 self.log(log_metrics, global_step)
