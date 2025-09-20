@@ -123,7 +123,17 @@ Configured schedule: steps_per_round=76 post_round_updates=76
   Step 01 | prev_summary=0000 chars ""
            | chapter=0456 chars "段落起始...段落末尾"
            | source=0456 chars "段落起始...段落末尾"
-           -> summary=0098 chars "策略输出前缀...策略输出后缀" len_ratio=0.22 sim=0.64 coverage=0.58 novelty=0.47 garbled=0.00 word_nc=0.00 penalties=0.00/0.00 reward=1.02
+           -> summary=0098 chars "策略输出前缀...策略输出后缀"
+           len_ratio=0.220 （摘要长度与信息源比值，偏低会导致覆盖不足）
+           sim=0.640 （字符级相似度，衡量摘要整体贴近原文的程度）
+           coverage=0.580 （覆盖率，统计摘要覆盖原文字符的比例）
+           novelty=0.470 （新颖度，越高表示抄写成分越少）
+           lex_cos=0.230 （章节 TF-IDF 余弦相似度，反映高权重词是否匹配）
+           lex_js=0.120 （词频 Jensen-Shannon 相似度，衡量整体词频结构的接近程度）
+           garbled=0.000 （乱码比率，非法或不可打印字符占比）
+           word_nc=0.000 （词合规缺失率，识别异常汉字或未见过的双字组合）
+           penalties=0.000/0.000 （乱码与词合规惩罚项，越高惩罚越重）
+           reward=1.020 （综合奖励，负值说明当前摘要受到惩罚多于鼓励）
 ...
     Update 076 | policy_loss=-0.1234 q1_loss=0.5678 q2_loss=0.9123 avg_reward=-0.4321
     Post-round metric averages | policy_loss=-0.2345 q1_loss=0.4567 q2_loss=0.8910 average_reward=-0.3210

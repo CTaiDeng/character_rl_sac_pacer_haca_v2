@@ -1181,17 +1181,28 @@ class DemoTrainer(Trainer):
                 "lexical_token_count": metrics.get("lexical_token_count", 0.0),
             }
             print(
-                f"           -> summary={summary_len:04d} chars \"{summary_preview}\" "
-                f"len_ratio={log_metrics['length_ratio']:.3f} "
-                f"sim={log_metrics['similarity']:.3f} "
-                f"coverage={log_metrics['coverage_ratio']:.3f} "
-                f"novelty={log_metrics['novelty_ratio']:.3f} "
-                f"lex_cos={log_metrics['lexical_cosine']:.3f} "
-                f"lex_js={log_metrics['lexical_js_similarity']:.3f} "
-                f"garbled={log_metrics['garbled_ratio']:.3f} "
-                f"word_nc={log_metrics['word_noncompliance_ratio']:.3f} "
-                f"penalties={log_metrics['garbled_penalty']:.3f}/{log_metrics['word_penalty']:.3f} "
-                f"reward={transition.reward:.3f}"
+                f"           -> summary={summary_len:04d} chars \"{summary_preview}\""
+            )
+            metric_indent = "           "
+            metric_descriptions: list[tuple[str, str, str]] = [
+                ("len_ratio", "length_ratio", "摘要长度与信息源比值，偏低会导致覆盖不足"),
+                ("sim", "similarity", "字符级相似度，衡量摘要整体贴近原文的程度"),
+                ("coverage", "coverage_ratio", "覆盖率，统计摘要覆盖原文字符的比例"),
+                ("novelty", "novelty_ratio", "新颖度，越高表示抄写成分越少"),
+                ("lex_cos", "lexical_cosine", "章节 TF-IDF 余弦相似度，反映高权重词是否匹配"),
+                ("lex_js", "lexical_js_similarity", "词频 Jensen-Shannon 相似度，衡量整体词频结构的接近程度"),
+                ("garbled", "garbled_ratio", "乱码比率，非法或不可打印字符占比"),
+                ("word_nc", "word_noncompliance_ratio", "词合规缺失率，识别异常汉字或未见过的双字组合"),
+            ]
+            for label, key, description in metric_descriptions:
+                value = float(log_metrics.get(key, 0.0))
+                print(f"{metric_indent}{label}={value:.3f} （{description}）")
+            print(
+                f"{metric_indent}penalties={log_metrics['garbled_penalty']:.3f}/"
+                f"{log_metrics['word_penalty']:.3f} （乱码与词合规惩罚项，越高惩罚越重）"
+            )
+            print(
+                f"{metric_indent}reward={transition.reward:.3f} （综合奖励，负值说明当前摘要受到惩罚多于鼓励）"
             )
             if log_metrics:
                 self.log(log_metrics, global_step)
