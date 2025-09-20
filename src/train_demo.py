@@ -1361,9 +1361,13 @@ class TextPolicyNetwork(nn.Module):
                 continue
             prev_token_id = int(prev_tokens[batch_idx].item())
             prev_char = self._tokenizer_ref.token_from_id(prev_token_id)
+            if prev_char in self._tokenizer_ref.special_tokens or len(prev_char) != 1:
+                prev_char = None
             allowed_ids: set[int] = {eos_id}
             for token_id in summary_token_ids:
                 candidate_char = self._tokenizer_ref.token_from_id(token_id)
+                if len(candidate_char) != 1:
+                    continue
                 if self._word_checker.is_candidate_allowed(prev_char, candidate_char):
                     allowed_ids.add(token_id)
             if not allowed_ids:
