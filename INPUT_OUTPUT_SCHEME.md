@@ -1,87 +1,62 @@
 # 当前输入-输出数据方案说明
 
 ## 总览
-训练环境以章节为单位推进，记文章共有 $T$ 个章节。第 $t$ 步（Iteration/Step）收到的观测为
-$$
-O_t = (S_{t-1}, C_t)
-$$
-其中：
-- $S_{t-1}$ 表示上一轮策略生成的整段摘要文本；
-- $C_t$ 表示当前章节的全文原文。
+每个训练轮次以章节为粒度推进。第 t 步的环境观测由三部分组成：
+1. 认知资本快照 `capital_snapshot_{t-1}`，以字符串形式呈现现有事实、验证记录和预算；
+2. 当前章节原文 `chapter_t`；
+3. 剩余预算 `budget_t`，被编码进资本快照的前缀。
 
-策略网络直接输出新的章节摘要 $S_t$，并作为后续步骤的历史上下文。
+策略网络输出一串字符，解析后得到一系列操作（如 ACQUIRE、EXTRACT、VERIFY 等），环境据此更新认知资本并扣减预算。
 
 ## 数据结构
 | 符号 | 含义 | 具体来源 |
 | --- | --- | --- |
-| $S_0$ | 初始摘要，置为空字符串 | 训练开始时环境重置 |
-| $C_t$ | 第 $t$ 章原文 | `load_article_features()` 读取 `data/sample_article.txt` 并按章节切分 |
-| $O_t$ | 观测对 | `TextObservation(previous_summary=S_{t-1}, chapter_text=C_t)` |
-| $A_t$ | 行动（模型输出） | `TextAction(text=S_t, token_ids, length)` |
-| $R_t$ | 即时奖励 | `analyze_summary(S_t, S_{t-1}+C_t)` 产生的质量分数 |
-| \mathcal{L} | 章节词频缓存（TF-IDF 与概率分布） | `data/sample_article_lexical.json`，由 `scripts/compute_chapter_tfidf.py` 预生成 |
+| `capital_snapshot_0` | 初始认知资本（空集合与满额预算） | 环境 `reset()` 时由 `CognitiveCapital` 构造 |
+| `chapter_t` | 第 t 章原文 | `load_article_features()` 从 `data/sample_article.txt` 切分 |
+| `observation_t` | 观测结构 | `TextObservation(previous_summary=capital_snapshot_{t-1}, chapter_text=chapter_t)` |
+| `action_t` | 字符级操作序列 | `TextAction(text=policy_output, token_ids, length)` |
+| `capital_t` | 更新后的认知资本 | `CognitiveCapital.apply()` 依次执行解析出的操作 |
+| `budget_t` | 剩余预算 | 初始值 `DEFAULT_INITIAL_BUDGET`，每个操作按 `OPERATION_COSTS` 扣减 |
+| `valuation_t` | 资本估值 | `CapitalValuator.value()` 基于覆盖、多样、冗余与验证计算 |
 
-`CharTokenizer` 在上述观测与行动上构造字符级序列：
-- 观测编码：`[BOS] + chars(S_{t-1}) + [SEP] + chars(C_t) + [EOS]`。
-- 行动编码：`[BOS] + chars(S_t) + [EOS]`。
-- 汉字词表限定在 $\mathcal{V}_{\text{summary}}$（见下节），其余字符映射到 `<unk>` 以保持编码稳定。
+## 操作解析与预算演化
+- 策略输出按行划分操作，允许的指令包括 `ACQUIRE`, `EXTRACT`, `LINK`, `VERIFY`, `HEDGE`, `TRIM`, `COMMIT`，以及对应缩写（ACQ、EXT、LNK 等）。
+- `OperationParser.parse()` 将文本映射为结构化 `Operation` 列表，环境逐条执行。
+- 每条操作消耗固定成本，成本来源 `OPERATION_COSTS`，若未定义则使用 `DEFAULT_OPERATION_COST`。
+- 预算为浮点数，可透支；当预算小于零时会触发额外惩罚项。
 
-## 字符集约束与采样调节
-- 从 `data/sample_article.txt` 统计每个汉字的出现次数 $f(\chi)$，令 $\mu = \operatorname{mean}(f(\chi))$、$\sigma = \operatorname{pstdev}(f(\chi))$，抽取高频集合
-  $$\mathcal{V}_{\text{common}} = \{\chi \mid f(\chi) \ge \mu + \sigma\}$$
-  若集合为空，则回退到按频次排序的前 $200$ 个汉字。最终可用摘要字符集为
-  $$\mathcal{V}_{\text{summary}} = \mathcal{V}_{\text{common}} \cup \Pi$$
-  其中 $\Pi$ 为常用中英文标点集合。
-- 采样阶段根据 `WordComplianceChecker` 的双字库限制可选字符。记上一步生成的字符为 $p$，允许集合
-  $$\mathcal{A}(p) = \{\text{EOS}\} \cup \{\chi \in \mathcal{V}_{\text{summary}} \mid \text{checker.is_candidate_allowed}(p, \chi)\}$$
-  对于 $\mathcal{A}(p)$ 外的 token，将其对数几率减去固定惩罚 $\delta = 12$；若 $\lvert \mathcal{A}(p)\rvert < \lvert\mathcal{V}_{\text{summary}}\rvert + 1$，则对允许集合的 logits 以温度 $\tau = 0.85$ 进行缩放，使概率集中于合规片段。
-- 相关伪代码：
-```pseudo
-allowed <- {eos_id}
-for token_id in tokenizer.summary_token_ids:
-    char <- tokenizer.token_from_id(token_id)
-    if word_checker.is_candidate_allowed(prev_char, char):
-        allowed.add(token_id)
-mask <- ones_like(logits)
-mask[allowed] <- 0
-logits[mask == 1] -= 12
-if len(allowed) < len(tokenizer.summary_token_ids) + 1:
-    logits[allowed] /= 0.85
-```
+## 估值与奖励
+- `CapitalValuator.metrics()` 提供覆盖率、多样性、冗余度、验证比例等指标；`value()` 在此基础上累加奖励权重并对冲对冲行为带来的折扣。
+- 基础回报仅在终止步骤给出：`capital_value - COST_WEIGHT * cumulative_cost - BUDGET_PENALTY_WEIGHT * budget_breach`。
+- 为保持最优策略不变，引入潜能塑形：每步奖励额外累加 `potential(capital_t) - potential(capital_{t-1})`。潜能函数即 `CapitalValuator.potential()`，与估值等价。
 
 ## 迭代流程伪代码
 ```pseudo
-S_0 <- ""
-for round in 1..R:
-    for t in 1..T:
-        observation <- TextObservation(previous_summary=S_{t-1}, chapter_text=C_t)
-        obs_tokens <- tokenizer.encode_observation(observation)
-        action_tokens <- policy.sample(obs_tokens)
-        S_t <- tokenizer.decode_action(action_tokens)
-        reward_t, metrics_t <- analyze_summary(
-            summary=S_t,
-            source=concat(S_{t-1}, C_t),
-            chapter_index=t,
-            lexical_stats=\mathcal{L},
-            lexical_tokenizer=lexical_tokenizer
-        )
-        buffer.push(
-            state=observation,
-            action=TextAction(token_ids=action_tokens, text=S_t, length=len(S_t)),
-            reward=reward_t,
-            next_state=TextObservation(S_t, C_{t+1}) if t < T else terminal_state
-        )
-        log_step(round, t, S_t, metrics_t)
-    update_agent(buffer, episodes=post_round_updates)
-    log_round(round, sum_{t=1}^T reward_t)
+initial_capital <- CognitiveCapital()
+budget <- DEFAULT_INITIAL_BUDGET
+capital_text <- initial_capital.render_text(budget)
+for t in 1..T:
+    observation <- TextObservation(previous_summary=capital_text, chapter_text=chapter_t)
+    obs_tokens <- tokenizer.encode_observation(observation)
+    action_tokens <- policy.sample(obs_tokens)
+    action_text <- tokenizer.decode_action(action_tokens)
+    operations <- OperationParser.parse(action_text)
+    step_cost <- 0
+    for op in operations:
+        capital.apply(op)
+        step_cost += OPERATION_COSTS.get(op.kind, DEFAULT_OPERATION_COST)
+    budget <- budget - step_cost
+    valuation <- valuator.value(capital)
+    reward_t <- shaped_reward(valuation, step_cost, budget)
+    capital_text <- capital.render_text(budget)
+    buffer.push(state=observation, action=TextAction(token_ids=action_tokens, text=action_text, length=len(action_text)), reward=reward_t, next_state=next_observation)
 ```
 
 ## 输入与输出要点
-- **输入**：上一轮摘要与当前章节全文的直接拼接，既以原始字符串形式供日志使用，又以字符 ID 序列供模型计算。
-- **输出**：策略生成的整段摘要文本 $S_t$，不再做长度裁剪，仅在日志中记录其字符数、质量指标与惩罚项。
-- **辅助缓存**：\mathcal{L} 持久化章节词频，奖励计算阶段一次读取，多次复用，避免重复统计。
-- **日志扩展**：在原有指标基础上新增 `lexical_cosine` 与 `lexical_js` 等词频相似度输出，便于离线诊断。
-- **依赖关系**：$S_t$ 同时成为下一步的 $S_{t-1}$，保证“摘要递推”链条成立；回放缓冲区按 `Transition` 记录 $(O_t, A_t, R_t, O_{t+1})$。
-- **终止条件**：当 $t = T$ 时标记 `done=True`，一轮结束后清空累积摘要并重新开始下一轮训练。
+- **观测编码**：`CharTokenizer.encode_observation` 将资本快照、章节文本与界定符 `[BOS]/[SEP]/[EOS]` 拼接成字符 ID 序列。
+- **行动编码**：策略输出同样通过字符级解码得到文本指令，仍使用统一词表，避免临时 token。
+- **认知资本**：`CognitiveCapital` 维护事实集合、验证集合、对冲集合与链接集合，并提供 `render_text()` 用于形成下一步观测。
+- **预算约束**：预算完整保留在环境内部，透支时在奖励中追加惩罚，同时通过日志字段 `budget_remaining`、`budget_breach` 对外暴露。
+- **日志指标**：环境为每步记录资本估值、覆盖、多样、冗余、验证比例、操作数量与成本等指标，并写入 `STEP_CSV_HEADERS`。
 
-> 若未来调整观测或行动的组成（例如改用子词分词、引入多模态信号），需同步更新本文档，确保开发者始终掌握最新的数据接口约定。
+> 若后续扩展操作集合或估值模型（例如引入风险度量、约束乘子），需同步更新本说明，保持实现与文档一致。

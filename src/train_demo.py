@@ -19,6 +19,8 @@ import subprocess
 import statistics
 import sys
 import unicodedata
+import itertools
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -88,6 +90,17 @@ STEP_CSV_HEADERS = [
     "lexical_cosine",
     "lexical_js_similarity",
     "lexical_token_count",
+    "capital_value",
+    "capital_coverage",
+    "capital_diversity",
+    "capital_redundancy",
+    "capital_verification_ratio",
+    "capital_fact_count",
+    "capital_operations",
+    "operation_cost",
+    "budget_remaining",
+    "budget_breach",
+    "cumulative_cost",
 ]
 
 ROUND_CSV_HEADERS = [
@@ -171,7 +184,23 @@ COMMON_SUMMARY_PUNCTUATION = {
     ' ',
 }
 DEFAULT_COMPLIANCE_TEMPERATURE = 0.85
-COMPLIANCE_INVALID_LOGIT_PENALTY = 12.0
+OPERATION_COSTS = {
+    "ACQUIRE": 3.0,
+    "EXTRACT": 3.0,
+    "LINK": 2.0,
+    "VERIFY": 4.0,
+    "HEDGE": 1.5,
+    "TRIM": 1.0,
+    "COMMIT": 5.0,
+}
+DEFAULT_OPERATION_COST = 2.0
+DEFAULT_INITIAL_BUDGET = 120.0
+COST_WEIGHT = 0.08
+BUDGET_PENALTY_WEIGHT = 0.02
+CAPITAL_COVERAGE_WEIGHT = 1.5
+CAPITAL_DIVERSITY_WEIGHT = 0.8
+CAPITAL_REDUNDANCY_WEIGHT = 0.6
+CAPITAL_VERIFICATION_BONUS = 0.4
 
 
 class TorchUnavailableError(RuntimeError):
@@ -461,6 +490,219 @@ class WordComplianceChecker:
         return noncompliant / total_cjk
 
 
+@dataclass
+class Operation:
+    kind: str
+    payload: str | tuple[str, str] | None = None
+
+
+class OperationParser:
+    """Parse textual actions into structured operations."""
+
+    COMMAND_ALIASES: Mapping[str, str] = {
+        "ACQ": "ACQUIRE",
+        "EXT": "EXTRACT",
+        "VER": "VERIFY",
+        "HDG": "HEDGE",
+        "TRM": "TRIM",
+        "CMIT": "COMMIT",
+        "LNK": "LINK",
+    }
+
+    @classmethod
+    def parse(cls, action_text: str) -> list[Operation]:
+        operations: list[Operation] = []
+        if not action_text:
+            return operations
+        for raw_line in action_text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            parts = line.split(maxsplit=1)
+            command = parts[0].upper()
+            command = cls.COMMAND_ALIASES.get(command, command)
+            payload = parts[1].strip() if len(parts) > 1 else ""
+            if command == "LINK":
+                left, right = cls._parse_link_payload(payload)
+                operations.append(Operation(command, (left, right)))
+                continue
+            if command in {"ACQUIRE", "EXTRACT", "VERIFY", "HEDGE", "TRIM", "COMMIT"}:
+                operations.append(Operation(command, payload))
+        return operations
+
+    @staticmethod
+    def _parse_link_payload(payload: str) -> tuple[str, str]:
+        if "->" in payload:
+            left, right = payload.split("->", 1)
+            return left.strip(), right.strip()
+        if "=>" in payload:
+            left, right = payload.split("=>", 1)
+            return left.strip(), right.strip()
+        tokens = payload.split(maxsplit=1)
+        if len(tokens) == 2:
+            return tokens[0].strip(), tokens[1].strip()
+        return payload.strip(), payload.strip()
+
+
+class CognitiveCapital:
+    """Stateful representation of extracted knowledge."""
+
+    def __init__(self) -> None:
+        self.facts: set[str] = set()
+        self.links: set[tuple[str, str]] = set()
+        self.verified: set[str] = set()
+        self.hedged: set[str] = set()
+
+    def clone(self) -> "CognitiveCapital":
+        clone = CognitiveCapital()
+        clone.facts = set(self.facts)
+        clone.links = set(self.links)
+        clone.verified = set(self.verified)
+        clone.hedged = set(self.hedged)
+        return clone
+
+    def apply(self, operation: Operation) -> dict[str, object]:
+        result = {"applied": False, "detail": ""}
+        op_type = operation.kind.upper()
+        if op_type in {"ACQUIRE", "EXTRACT"}:
+            fact = self._normalize_fact(str(operation.payload or ""))
+            if fact:
+                before = len(self.facts)
+                self.facts.add(fact)
+                result["applied"] = len(self.facts) > before
+                result["detail"] = fact
+        elif op_type == "TRIM":
+            fact = self._normalize_fact(str(operation.payload or ""))
+            if fact and fact in self.facts:
+                self.facts.remove(fact)
+                self.verified.discard(fact)
+                self.hedged.discard(fact)
+                result["applied"] = True
+                result["detail"] = fact
+        elif op_type == "VERIFY":
+            fact = self._normalize_fact(str(operation.payload or ""))
+            if fact:
+                self.verified.add(fact)
+                result["applied"] = True
+                result["detail"] = fact
+        elif op_type == "HEDGE":
+            fact = self._normalize_fact(str(operation.payload or ""))
+            if fact:
+                self.hedged.add(fact)
+                result["applied"] = True
+                result["detail"] = fact
+        elif op_type == "LINK":
+            left, right = operation.payload if isinstance(operation.payload, tuple) else ("", "")
+            left = self._normalize_fact(left)
+            right = self._normalize_fact(right)
+            if left and right:
+                edge = tuple(sorted((left, right)))
+                before = len(self.links)
+                self.links.add(edge)
+                result["applied"] = len(self.links) > before
+                result["detail"] = edge
+        elif op_type == "COMMIT":
+            summary_fact = self._normalize_fact(str(operation.payload or ""))
+            if summary_fact:
+                self.facts.add(summary_fact)
+                self.verified.add(summary_fact)
+                result["applied"] = True
+                result["detail"] = summary_fact
+        return result
+
+    def _normalize_fact(self, text: str) -> str:
+        return re.sub(r"\s+", " ", text.strip())
+
+    def render_text(self, budget: float) -> str:
+        fact_preview = "; ".join(sorted(self.facts)[:5])
+        link_preview = "; ".join("->".join(edge) for edge in sorted(self.links)[:5])
+        verified_preview = "; ".join(sorted(self.verified)[:5])
+        hedge_preview = "; ".join(sorted(self.hedged)[:5])
+        return (
+            f"BUDGET={budget:.1f} | FACTS=[{fact_preview}] | LINKS=[{link_preview}] "
+            f"| VERIFIED=[{verified_preview}] | HEDGED=[{hedge_preview}]"
+        )
+
+    def all_facts(self) -> set[str]:
+        return set(self.facts)
+
+
+class CapitalValuator:
+    """Compute valuation and potential for cognitive capital."""
+
+    def __init__(self, chapters: Sequence[str]) -> None:
+        self.universe_tokens: set[str] = set()
+        self.category_universe: set[str] = set()
+        for chapter in chapters:
+            tokens = self._tokenize(chapter)
+            self.universe_tokens.update(tokens)
+            if tokens:
+                self.category_universe.add(next(iter(tokens)))
+        if not self.universe_tokens:
+            self.universe_tokens.add("token")
+        if not self.category_universe:
+            self.category_universe.add("general")
+
+    def _tokenize(self, text: str) -> set[str]:
+        return {token.lower() for token in re.findall(r"[A-Za-z0-9]+", text) if len(token) > 1}
+
+    def _fact_tokens(self, fact: str) -> set[str]:
+        return self._tokenize(fact)
+
+    def metrics(self, capital: CognitiveCapital) -> dict[str, float]:
+        token_coverage: set[str] = set()
+        categories: set[str] = set()
+        fact_tokens: list[set[str]] = []
+        for fact in capital.all_facts():
+            tokens = self._fact_tokens(fact)
+            if tokens:
+                token_coverage.update(tokens)
+                categories.add(next(iter(tokens)))
+            fact_tokens.append(tokens)
+        coverage_ratio = len(token_coverage) / max(1, len(self.universe_tokens))
+        diversity_ratio = len(categories) / max(1, len(self.category_universe))
+        redundancy_score = self._redundancy(fact_tokens)
+        verification_ratio = len(capital.verified) / max(1, len(capital.facts))
+        hedge_ratio = len(capital.hedged) / max(1, len(capital.facts) + len(capital.hedged))
+        return {
+            "coverage": coverage_ratio,
+            "diversity": diversity_ratio,
+            "redundancy": redundancy_score,
+            "verification": verification_ratio,
+            "hedge": hedge_ratio,
+            "fact_count": float(len(capital.facts)),
+        }
+
+    def _redundancy(self, fact_tokens: list[set[str]]) -> float:
+        if len(fact_tokens) < 2:
+            return 0.0
+        pair_scores: list[float] = []
+        for left, right in itertools.combinations(fact_tokens, 2):
+            if not left or not right:
+                continue
+            intersection = left.intersection(right)
+            union = left.union(right)
+            if union:
+                pair_scores.append(len(intersection) / len(union))
+        if not pair_scores:
+            return 0.0
+        return sum(pair_scores) / len(pair_scores)
+
+    def value(self, capital: CognitiveCapital) -> float:
+        metrics = self.metrics(capital)
+        raw_value = (
+            CAPITAL_COVERAGE_WEIGHT * metrics["coverage"]
+            + CAPITAL_DIVERSITY_WEIGHT * metrics["diversity"]
+            - CAPITAL_REDUNDANCY_WEIGHT * metrics["redundancy"]
+            + CAPITAL_VERIFICATION_BONUS * metrics["verification"]
+        )
+        hedge_discount = 1.0 - 0.2 * metrics["hedge"]
+        return max(raw_value * hedge_discount, 0.0)
+
+    def potential(self, capital: CognitiveCapital) -> float:
+        return self.value(capital)
+
+
 def _format_text_debug(text: str, head: int = 10, tail: int = 10) -> Tuple[int, str]:
     """Return the length of ``text`` and a preview with an ellipsis."""
 
@@ -554,6 +796,60 @@ def _describe_metric_quality(key: str, value: float) -> str:
         if value < 0.05:
             return "本次词语合规性偏弱"
         return "本次词语合规性严重不足"
+    if key == "capital_value":
+        if value < 0.20:
+            return "本次认知资本价值偏低，需补充高价值事实"
+        if value < 0.50:
+            return "本次认知资本价值中等，可继续累积"
+        if value < 1.00:
+            return "本次认知资本价值稳健"
+        return "本次认知资本价值表现突出"
+    if key == "capital_coverage":
+        if value < 0.15:
+            return "认知覆盖范围极窄"
+        if value < 0.35:
+            return "认知覆盖偏少"
+        if value < 0.60:
+            return "认知覆盖尚可"
+        return "认知覆盖全面"
+    if key == "capital_diversity":
+        if value < 0.10:
+            return "事实主题单一"
+        if value < 0.30:
+            return "事实主题略显集中"
+        if value < 0.60:
+            return "事实主题较为多样"
+        return "事实主题高度多样"
+    if key == "capital_redundancy":
+        if value < 0.05:
+            return "冗余极低"
+        if value < 0.15:
+            return "冗余可接受"
+        if value < 0.30:
+            return "冗余偏高，需合并重复信息"
+        return "冗余严重，建议清理"
+    if key == "capital_verification_ratio":
+        if value < 0.10:
+            return "验证覆盖不足"
+        if value < 0.40:
+            return "验证尚需加强"
+        if value < 0.70:
+            return "验证覆盖良好"
+        return "验证充分"
+    if key == "budget_remaining":
+        if value < -1e-6:
+            return "预算已透支"
+        if value < 20:
+            return "预算即将耗尽"
+        if value < 60:
+            return "预算消耗过半"
+        return "预算仍然充裕"
+    if key == "capital_fact_count":
+        if value < 3:
+            return "事实数量偏少"
+        if value < 8:
+            return "事实数量适中"
+        return "事实数量充足"
     return "本次指标无预设评估标准"
 
 
@@ -1167,13 +1463,13 @@ class ArticleEnvironment:
         tokenizer: CharTokenizer,
         lexical_statistics: ChapterLexicalStatistics | None = None,
         lexical_tokenizer: LexicalTokenizer | None = None,
+        initial_budget: float = DEFAULT_INITIAL_BUDGET,
+        cost_weight: float = COST_WEIGHT,
     ) -> None:
         if not chapters:
             raise ValueError("The environment requires at least one chapter.")
         self._chapters = list(chapters)
         self._cursor = 0
-        self._current_summary = ""
-        self._last_metrics: MutableMapping[str, float] = {}
         self._tokenizer = tokenizer
         self._word_checker = WordComplianceChecker(self._chapters)
         self._lexical_statistics = lexical_statistics
@@ -1189,12 +1485,23 @@ class ArticleEnvironment:
                     force_backend="regex",
                 )
         self._lexical_tokenizer = lexical_tokenizer
+        self._valuator = CapitalValuator(self._chapters)
+        self._initial_budget = float(initial_budget)
+        self._cost_weight = float(cost_weight)
+        self._capital = CognitiveCapital()
+        self._budget = self._initial_budget
+        self._cumulative_cost = 0.0
+        self._current_summary = self._capital.render_text(self._budget)
+        self._last_metrics: MutableMapping[str, float] = {}
 
     def reset(self) -> TextObservation:
         self._cursor = 0
-        self._current_summary = ""
+        self._capital = CognitiveCapital()
+        self._budget = self._initial_budget
+        self._cumulative_cost = 0.0
         self._last_metrics = {}
-        return TextObservation("", self._chapters[0], 1)
+        self._current_summary = self._capital.render_text(self._budget)
+        return TextObservation(self._current_summary, self._chapters[0], 1)
 
     def step(self, action: TextAction) -> Transition:
         state = TextObservation(
@@ -1215,50 +1522,37 @@ class ArticleEnvironment:
             lexical_stats=self._lexical_statistics,
             lexical_tokenizer=self._lexical_tokenizer,
         )
-        similarity_reward = QUALITY_SIMILARITY_WEIGHT * _nonlinear_reward(
-            metrics["similarity"], QUALITY_NONLINEAR_EXPONENT
-        )
-        coverage_reward = QUALITY_COVERAGE_WEIGHT * _nonlinear_reward(
-            metrics["coverage_ratio"], QUALITY_NONLINEAR_EXPONENT
-        )
-        novelty_reward = QUALITY_NOVELTY_WEIGHT * _nonlinear_reward(
-            metrics["novelty_ratio"], QUALITY_NONLINEAR_EXPONENT
-        )
-        lexical_reward = LEXICAL_SIMILARITY_WEIGHT * _nonlinear_reward(
-            metrics["lexical_cosine"], LEXICAL_NONLINEAR_EXPONENT
-        )
-        lexical_js_reward = LEXICAL_JS_WEIGHT * _nonlinear_reward(
-            metrics["lexical_js_similarity"], LEXICAL_NONLINEAR_EXPONENT
-        )
-        garbled_penalty = _clamp_unit_interval(metrics["garbled_penalty"])
-        garbled_cleanliness = 1.0 - garbled_penalty
-        garbled_reward = GARBLED_REWARD_WEIGHT * (
-            _nonlinear_reward(garbled_cleanliness, CLEANLINESS_NONLINEAR_EXPONENT)
-            - _nonlinear_reward(garbled_penalty, CLEANLINESS_NONLINEAR_EXPONENT)
-        )
-        word_penalty = _clamp_unit_interval(metrics["word_penalty"])
-        word_cleanliness = 1.0 - word_penalty
-        word_reward = WORD_COMPLIANCE_REWARD_WEIGHT * (
-            _nonlinear_reward(word_cleanliness, CLEANLINESS_NONLINEAR_EXPONENT)
-            - _nonlinear_reward(word_penalty, CLEANLINESS_NONLINEAR_EXPONENT)
-        )
-        reward = (
-            similarity_reward
-            + coverage_reward
-            + novelty_reward
-            + lexical_reward
-            + lexical_js_reward
-            + garbled_reward
-            + word_reward
-        )
-        metrics["reward"] = reward
-        metrics["source_length"] = float(len(source_text))
-        metrics["previous_summary_length"] = float(len(state.previous_summary))
-        metrics.setdefault("chapter_length", float(len(state.chapter_text)))
-        self._last_metrics = metrics
-        self._current_summary = action.text
+        capital_before = self._capital.clone()
+        potential_before = self._valuator.potential(capital_before)
+        operations = OperationParser.parse(action.text)
+        step_cost = 0.0
+        applied_operations = 0
+        for operation in operations:
+            op_kind = operation.kind.upper()
+            cost = OPERATION_COSTS.get(op_kind, DEFAULT_OPERATION_COST)
+            result = self._capital.apply(operation)
+            if result.get("applied", False):
+                applied_operations += 1
+            step_cost += cost
+        self._budget -= step_cost
+        self._cumulative_cost += step_cost
+        budget_breach = max(0.0, -self._budget)
+        capital_metrics = self._valuator.metrics(self._capital)
+        capital_value = self._valuator.value(self._capital)
+        potential_after = self._valuator.potential(self._capital)
+        done = self._cursor + 1 >= len(self._chapters)
+        if done:
+            base_reward = (
+                capital_value
+                - self._cost_weight * self._cumulative_cost
+                - BUDGET_PENALTY_WEIGHT * budget_breach
+            )
+        else:
+            base_reward = -BUDGET_PENALTY_WEIGHT * budget_breach
+        reward = base_reward + (potential_after - potential_before)
+        next_summary = self._capital.render_text(self._budget)
+        self._current_summary = next_summary
         self._cursor += 1
-        done = self._cursor >= len(self._chapters)
         if not done:
             next_state = TextObservation(
                 previous_summary=self._current_summary,
@@ -1271,6 +1565,21 @@ class ArticleEnvironment:
                 chapter_text="",
                 step_index=self._cursor + 1,
             )
+        metrics.update({
+            "capital_value": float(capital_value),
+            "capital_operations": float(applied_operations),
+            "operation_cost": float(step_cost),
+            "budget_remaining": float(self._budget),
+            "cumulative_cost": float(self._cumulative_cost),
+            "budget_breach": float(budget_breach),
+            "reward": reward,
+        })
+        metrics["capital_coverage"] = capital_metrics["coverage"]
+        metrics["capital_diversity"] = capital_metrics["diversity"]
+        metrics["capital_redundancy"] = capital_metrics["redundancy"]
+        metrics["capital_verification_ratio"] = capital_metrics["verification"]
+        metrics["capital_fact_count"] = capital_metrics["fact_count"]
+        self._last_metrics = metrics
         transition = Transition(
             state=state,
             action=action,
@@ -1295,7 +1604,6 @@ class ArticleEnvironment:
     @property
     def lexical_tokenizer(self) -> LexicalTokenizer | None:
         return self._lexical_tokenizer
-
 
 class SimpleReplayBuffer(BaseReplayBuffer):
     """In-memory FIFO replay buffer used solely for the demonstration."""
@@ -1873,6 +2181,12 @@ class DemoTrainer(Trainer):
                 ("lex_js", "lexical_js_similarity", "词频 Jensen-Shannon 相似度，衡量整体词频结构的接近程度"),
                 ("garbled", "garbled_ratio", "乱码比率，非法或不可打印字符占比"),
                 ("word_nc", "word_noncompliance_ratio", "词合规缺失率，识别异常汉字或未见过的双字组合"),
+                ("cap_val", "capital_value", "认知资本估值，综合覆盖、多样与验证实力"),
+                ("cap_cov", "capital_coverage", "认知覆盖率，衡量知识对主题的覆盖"),
+                ("cap_div", "capital_diversity", "认知多样性，反映事实主题的广度"),
+                ("cap_red", "capital_redundancy", "冗余度，越低越精炼"),
+                ("cap_ver", "capital_verification_ratio", "验证比例，越高越可靠"),
+                ("budget", "budget_remaining", "剩余预算，反映资源消耗进度"),
             ]
             for label, key, description in metric_descriptions:
                 value = float(log_metrics.get(key, 0.0))
@@ -1991,42 +2305,42 @@ class DemoTrainer(Trainer):
                 )
 
     def render_iterative_summary(self) -> List[str]:
-        """Render iterative summaries distilled by the policy's deterministic output."""
+        """Render iterative capital accrual generated by the deterministic policy."""
 
-        rendered_iterations: List[str] = ["Iteration 00 | chars=0000 | <empty>"]
-        aggregated_summary = ""
+        initial_budget = getattr(self.environment, "_initial_budget", DEFAULT_INITIAL_BUDGET)
+        valuator = getattr(self.environment, "_valuator", CapitalValuator(self._intervals))
+        capital = CognitiveCapital()
+        budget = float(initial_budget)
+        cumulative_cost = 0.0
+        rendered_iterations: List[str] = [
+            f"Iteration 00 | capital_value=0.000 budget={budget:.1f} | <empty>"
+        ]
         for idx, chapter in enumerate(self._intervals, start=1):
             observation = TextObservation(
-                previous_summary=aggregated_summary,
+                previous_summary=capital.render_text(budget),
                 chapter_text=chapter,
                 step_index=idx,
             )
             action = self.agent.act(observation, deterministic=True)
-            source_text = _combine_summary_and_chapter(
-                observation.previous_summary, chapter
-            )
-            metrics = analyze_summary(
-                action.text,
-                source_text,
-                tokenizer=self.agent.tokenizer,
-                word_checker=self.environment.word_checker,
-                chapter_text=chapter,
-                chapter_index=idx,
-                lexical_stats=self.environment.lexical_statistics,
-                lexical_tokenizer=self.environment.lexical_tokenizer,
-            )
-            aggregated_summary = action.text
-            summary_len, preview = _format_text_debug(action.text, 32, 32)
+            operations = OperationParser.parse(action.text)
+            step_cost = 0.0
+            for operation in operations:
+                op_kind = operation.kind.upper()
+                cost = OPERATION_COSTS.get(op_kind, DEFAULT_OPERATION_COST)
+                capital.apply(operation)
+                step_cost += cost
+            budget -= step_cost
+            cumulative_cost += step_cost
+            capital_value = valuator.value(capital)
+            capital_metrics = valuator.metrics(capital)
+            preview_source = action.text.replace("\n", " ")
+            preview = preview_source[:48] + ("..." if len(preview_source) > 48 else "")
             rendered_iterations.append(
-                f"Iteration {idx:02d} | chars={summary_len:04d} "
-                f"sim={metrics['similarity']:.2f} "
-                f"coverage={metrics['coverage_ratio']:.2f} "
-                f"novelty={metrics['novelty_ratio']:.2f} "
-                f"lex_cos={metrics['lexical_cosine']:.2f} "
-                f"lex_js={metrics['lexical_js_similarity']:.2f} "
-                f"garbled={metrics['garbled_ratio']:.2f} "
-                f"word_nc={metrics['word_noncompliance_ratio']:.2f} "
-                f"penalties={metrics['garbled_penalty']:.2f}/{metrics['word_penalty']:.2f} | {preview}"
+                f"Iteration {idx:02d} | capital_value={capital_value:.3f} "
+                f"budget={budget:.1f} cost={step_cost:.2f} "
+                f"coverage={capital_metrics['coverage']:.2f} "
+                f"diversity={capital_metrics['diversity']:.2f} "
+                f"redundancy={capital_metrics['redundancy']:.2f} | {preview}"
             )
         return rendered_iterations
 
@@ -2071,6 +2385,8 @@ def build_demo_components(
         tokenizer=tokenizer,
         lexical_statistics=lexical_stats,
         lexical_tokenizer=lexical_tokenizer,
+        initial_budget=DEFAULT_INITIAL_BUDGET,
+        cost_weight=COST_WEIGHT,
     )
     replay_buffer = SimpleReplayBuffer(capacity)
     network_factory = DemoNetworkFactory(
