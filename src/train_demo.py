@@ -23,26 +23,37 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
 
-try:
+try:  # pragma: no cover - import guard exercised in tests via fallback path
     import torch
-except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
-    raise ModuleNotFoundError(
-        "PyTorch is required to run the demo. Run 'scripts/install_pytorch.sh' "
-        "or install it manually with 'python -m pip install torch --index-url "
-        "https://download.pytorch.org/whl/cpu'."
-    ) from exc
-from torch import nn
-from torch.distributions import Categorical
-from torch.nn import functional as F
-from torch.nn.utils.rnn import pack_padded_sequence
+    from torch import nn
+    from torch.distributions import Categorical
+    from torch.nn import functional as F
+    from torch.nn.utils.rnn import pack_padded_sequence
+    TORCH_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover - exercised in CI without torch
+    torch = None  # type: ignore[assignment]
+    nn = None  # type: ignore[assignment]
+    Categorical = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
+    pack_padded_sequence = None  # type: ignore[assignment]
+    TORCH_AVAILABLE = False
 
-from lexical_stats import (
-    ChapterLexicalStatistics,
-    LexicalTokenizer,
-    TokenizerUnavailableError,
-    cosine_similarity,
-    jensen_shannon_similarity,
-)
+try:  # pragma: no cover - exercised depending on invocation style
+    from .lexical_stats import (
+        ChapterLexicalStatistics,
+        LexicalTokenizer,
+        TokenizerUnavailableError,
+        cosine_similarity,
+        jensen_shannon_similarity,
+    )
+except ImportError:  # pragma: no cover - fallback for direct script execution
+    from lexical_stats import (  # type: ignore[no-redef]
+        ChapterLexicalStatistics,
+        LexicalTokenizer,
+        TokenizerUnavailableError,
+        cosine_similarity,
+        jensen_shannon_similarity,
+    )
 
 SRC_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = SRC_ROOT.parent
@@ -86,10 +97,16 @@ MODEL_SIZE_BYTES = 209_460_851
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from rl_sac.agent import AgentConfig, SACAgent
-from rl_sac.networks import NetworkFactory
-from rl_sac.replay_buffer import BaseReplayBuffer, Transition
-from rl_sac.trainer import Trainer, TrainerConfig
+try:  # pragma: no cover - exercised depending on invocation style
+    from .rl_sac.agent import AgentConfig, SACAgent
+    from .rl_sac.networks import NetworkFactory
+    from .rl_sac.replay_buffer import BaseReplayBuffer, Transition
+    from .rl_sac.trainer import Trainer, TrainerConfig
+except ImportError:  # pragma: no cover - fallback for direct script execution
+    from rl_sac.agent import AgentConfig, SACAgent  # type: ignore[no-redef]
+    from rl_sac.networks import NetworkFactory  # type: ignore[no-redef]
+    from rl_sac.replay_buffer import BaseReplayBuffer, Transition  # type: ignore[no-redef]
+    from rl_sac.trainer import Trainer, TrainerConfig  # type: ignore[no-redef]
 
 ARTICLE_SEGMENT_SEPARATOR = "[----------------------------------------------------->"
 
@@ -106,6 +123,54 @@ CONTROL_CHAR_WHITELIST = {"\n", "\r", "\t"}
 LEXICAL_STATS_SUFFIX = "_lexical.json"
 LEXICAL_SIMILARITY_WEIGHT = 0.15
 LEXICAL_JS_WEIGHT = 0.1
+
+
+class TorchUnavailableError(RuntimeError):
+    """Raised when a demo component requiring PyTorch is accessed without it."""
+
+
+def _raise_torch_unavailable(component: str) -> None:
+    """Raise a consistent error guiding users to install PyTorch for the demo."""
+
+    raise TorchUnavailableError(
+        f"{component} 需要先安装 PyTorch 才能使用。"
+        "请运行 'scripts/install_pytorch.sh' 或执行 "
+        "'python -m pip install torch --index-url https://download.pytorch.org/whl/cpu'。"
+    )
+
+
+if not TORCH_AVAILABLE:
+    class _TorchProxy:
+        def __getattr__(self, name: str) -> Any:  # pragma: no cover - simple error proxy
+            _raise_torch_unavailable(f"torch.{name}")
+
+
+    class _NNProxy:
+        Module = object
+
+        def __getattr__(self, name: str) -> Any:  # pragma: no cover - simple error proxy
+            _raise_torch_unavailable(f"torch.nn.{name}")
+
+
+    class _CategoricalProxy:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:  # pragma: no cover
+            _raise_torch_unavailable("torch.distributions.Categorical")
+
+
+    class _FunctionalProxy:
+        def __getattr__(self, name: str) -> Any:  # pragma: no cover - simple error proxy
+            _raise_torch_unavailable(f"torch.nn.functional.{name}")
+
+
+    def _missing_pack_padded_sequence(*args: Any, **kwargs: Any) -> None:  # pragma: no cover
+        _raise_torch_unavailable("torch.nn.utils.rnn.pack_padded_sequence")
+
+
+    torch = _TorchProxy()  # type: ignore[assignment]
+    nn = _NNProxy()  # type: ignore[assignment]
+    Categorical = _CategoricalProxy  # type: ignore[assignment]
+    F = _FunctionalProxy()  # type: ignore[assignment]
+    pack_padded_sequence = _missing_pack_padded_sequence  # type: ignore[assignment]
 
 
 @dataclass
@@ -148,6 +213,7 @@ class CharTokenizer:
         self._allowed_characters = {
             token for token in self.vocab if len(token) == 1 and token not in self.special_tokens
         }
+        self._allowed_characters.update(CONTROL_CHAR_WHITELIST)
 
     @property
     def pad_id(self) -> int:
@@ -806,13 +872,17 @@ class ArticleEnvironment:
         lexical_js_reward = LEXICAL_JS_WEIGHT * _nonlinear_reward(
             metrics["lexical_js_similarity"], LEXICAL_NONLINEAR_EXPONENT
         )
-        garbled_cleanliness = 1.0 - _clamp_unit_interval(metrics["garbled_penalty"])
-        garbled_reward = GARBLED_REWARD_WEIGHT * _nonlinear_reward(
-            garbled_cleanliness, CLEANLINESS_NONLINEAR_EXPONENT
+        garbled_penalty = _clamp_unit_interval(metrics["garbled_penalty"])
+        garbled_cleanliness = 1.0 - garbled_penalty
+        garbled_reward = GARBLED_REWARD_WEIGHT * (
+            _nonlinear_reward(garbled_cleanliness, CLEANLINESS_NONLINEAR_EXPONENT)
+            - _nonlinear_reward(garbled_penalty, CLEANLINESS_NONLINEAR_EXPONENT)
         )
-        word_cleanliness = 1.0 - _clamp_unit_interval(metrics["word_penalty"])
-        word_reward = WORD_COMPLIANCE_REWARD_WEIGHT * _nonlinear_reward(
-            word_cleanliness, CLEANLINESS_NONLINEAR_EXPONENT
+        word_penalty = _clamp_unit_interval(metrics["word_penalty"])
+        word_cleanliness = 1.0 - word_penalty
+        word_reward = WORD_COMPLIANCE_REWARD_WEIGHT * (
+            _nonlinear_reward(word_cleanliness, CLEANLINESS_NONLINEAR_EXPONENT)
+            - _nonlinear_reward(word_penalty, CLEANLINESS_NONLINEAR_EXPONENT)
         )
         reward = (
             similarity_reward
