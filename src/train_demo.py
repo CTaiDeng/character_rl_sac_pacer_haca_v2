@@ -599,14 +599,14 @@ class OperationParser:
                 payload = remainder[:split_match.start()]
             else:
                 payload = remainder
-            payload = payload.strip(" :-"'()[]")
+            payload = payload.strip(" :-\"'()[]")
             if not payload:
-                payload = fragment[:match.start()].strip(" :-"'()[]")
+                payload = fragment[:match.start()].strip(" :-\"'()[]")
             if command == "LINK":
                 results.append(("LINK", cls._heuristic_link_payload(payload)))
             else:
                 results.append((command, payload))
-        return results
+
 
     @classmethod
     def _heuristic_link_payload(cls, payload: str) -> tuple[str, str]:
@@ -1680,44 +1680,44 @@ class ArticleEnvironment:
         self._cumulative_cost += step_cost
         budget_breach = max(0.0, -self._budget)
 
-capital_metrics = self._valuator.metrics(self._capital)
-capital_value = self._valuator.value(self._capital)
-potential_after = self._valuator.potential(self._capital)
-potential_gain = potential_after - potential_before
-done = self._cursor + 1 >= len(self._chapters)
-if done:
-    base_reward = (
-        capital_value
-        - self._cost_weight * self._cumulative_cost
-        - BUDGET_PENALTY_WEIGHT * budget_breach
-    )
-else:
-    base_reward = -BUDGET_PENALTY_WEIGHT * budget_breach
+        capital_metrics = self._valuator.metrics(self._capital)
+        capital_value = self._valuator.value(self._capital)
+        potential_after = self._valuator.potential(self._capital)
+        potential_gain = potential_after - potential_before
+        done = self._cursor + 1 >= len(self._chapters)
+        if done:
+            base_reward = (
+            capital_value
+            - self._cost_weight * self._cumulative_cost
+            - BUDGET_PENALTY_WEIGHT * budget_breach
+            - BUDGET_PENALTY_WEIGHT * budget_breach
+            )
+            base_reward = -BUDGET_PENALTY_WEIGHT * budget_breach
 
-similarity_score = metrics.get("similarity", 0.0)
-coverage_score = metrics.get("coverage_ratio", 0.0)
-novelty_score = max(0.0, metrics.get("novelty_ratio", 0.0))
-lexical_cosine = metrics.get("lexical_cosine", 0.0)
-lexical_js = metrics.get("lexical_js_similarity", 0.0)
-garbled_ratio = metrics.get("garbled_ratio", 0.0)
-word_noncompliance = metrics.get("word_noncompliance_ratio", 0.0)
+        similarity_score = metrics.get("similarity", 0.0)
+        coverage_score = metrics.get("coverage_ratio", 0.0)
+        novelty_score = max(0.0, metrics.get("novelty_ratio", 0.0))
+        lexical_cosine = metrics.get("lexical_cosine", 0.0)
+        lexical_js = metrics.get("lexical_js_similarity", 0.0)
+        garbled_ratio = metrics.get("garbled_ratio", 0.0)
+        word_noncompliance = metrics.get("word_noncompliance_ratio", 0.0)
 
-quality_component = (
-    _nonlinear_reward(similarity_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_SIMILARITY_WEIGHT
-    + _nonlinear_reward(coverage_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_COVERAGE_WEIGHT
-    + _nonlinear_reward(novelty_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_NOVELTY_WEIGHT
-)
-lexical_component = (
-    _nonlinear_reward(lexical_cosine, LEXICAL_NONLINEAR_EXPONENT) * LEXICAL_SIMILARITY_WEIGHT
-    + _nonlinear_reward(lexical_js, LEXICAL_NONLINEAR_EXPONENT) * LEXICAL_JS_WEIGHT
-)
-cleanliness_penalty = (
-    _nonlinear_reward(garbled_ratio, CLEANLINESS_NONLINEAR_EXPONENT) * GARBLED_REWARD_WEIGHT
-    + _nonlinear_reward(word_noncompliance, CLEANLINESS_NONLINEAR_EXPONENT) * WORD_COMPLIANCE_REWARD_WEIGHT
-)
-soft_reward = quality_component + lexical_component - cleanliness_penalty
+        quality_component = (
+            _nonlinear_reward(similarity_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_SIMILARITY_WEIGHT
+            + _nonlinear_reward(coverage_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_COVERAGE_WEIGHT
+            + _nonlinear_reward(novelty_score, QUALITY_NONLINEAR_EXPONENT) * QUALITY_NOVELTY_WEIGHT
+        )
+        lexical_component = (
+            _nonlinear_reward(lexical_cosine, LEXICAL_NONLINEAR_EXPONENT) * LEXICAL_SIMILARITY_WEIGHT
+            + _nonlinear_reward(lexical_js, LEXICAL_NONLINEAR_EXPONENT) * LEXICAL_JS_WEIGHT
+        )
+        cleanliness_penalty = (
+            _nonlinear_reward(garbled_ratio, CLEANLINESS_NONLINEAR_EXPONENT) * GARBLED_REWARD_WEIGHT
+            + _nonlinear_reward(word_noncompliance, CLEANLINESS_NONLINEAR_EXPONENT) * WORD_COMPLIANCE_REWARD_WEIGHT
+        )
+        soft_reward = quality_component + lexical_component - cleanliness_penalty
 
-reward = base_reward + potential_gain + soft_reward
+        reward = base_reward + potential_gain + soft_reward
         next_summary = self._capital.render_text(self._budget)
         self._current_summary = next_summary
         self._cursor += 1
@@ -2583,8 +2583,9 @@ def _normalize_fact_snippet(text: str, max_chars: int = 120) -> str:
 
 
 def _extract_candidate_sentences(chapter_text: str, max_sentences: int = 3) -> list[str]:
-    sentences = re.split(r"[。！？!?\.
-]+", chapter_text)
+def _extract_candidate_sentences(chapter_text: str, max_sentences: int = 3) -> list[str]:
+    sentences = re.split(r"[。！？!?\.]+|
++", chapter_text)
     candidates: list[str] = []
     for sentence in sentences:
         normalized = _normalize_fact_snippet(sentence)
@@ -2649,7 +2650,6 @@ def _seed_replay_buffer_with_templates(
             break
     environment.reset()
     return seeds
-
 def build_demo_components(
     article_path: Path,
     capacity: int,
