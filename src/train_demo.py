@@ -948,6 +948,8 @@ ANSI_REWARD_TAGS = {
 }
 
 
+
+
 def _append_step_log(lines: Sequence[str], block_color: str) -> None:
     if not lines:
         return
@@ -960,6 +962,11 @@ def _append_step_log(lines: Sequence[str], block_color: str) -> None:
             handle.write(f"{raw}\n")
         handle.write("\n")
 
+
+
+
+
+
 def _console_log(message: str, *, color: str | None = None, log: bool = True) -> None:
     if color:
         print(f"{color}{message}{ANSI_RESET}")
@@ -969,8 +976,10 @@ def _console_log(message: str, *, color: str | None = None, log: bool = True) ->
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         TRAIN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with TRAIN_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(f"{message}
-")
+            handle.write(f"{message}\n")
+
+
+
 
 def _build_rewards_dashboard_html(
     step_rows: Sequence[Mapping[str, Any]],
