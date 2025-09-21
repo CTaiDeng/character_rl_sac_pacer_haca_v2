@@ -38,9 +38,10 @@
 
 ### 训练调度
 
-- `DemoTrainer` 扩展 `per_round_intervals` 参数，若存在则在每轮开始前调用 `environment.configure()` 设置当前章节的段落列表，并动态调整 `total_steps`；
+- `DemoTrainer` 扩展 `per_round_intervals` 参数，若存在则在每轮开始前调用 `environment.configure()` 设置当前章节的段落 / 字符序列，并动态调整 `total_steps`；
+- 字符模式在 `character_teacher_interval` 配置下周期性注入真实目标字符，实现可调节的 Teacher Forcing；
 - 策略热身与日志逻辑保持不变，但 `log_metrics` 现已完整写入 `capital_value`、`budget_remaining` 等指标，配合 `:.6f` 精度便于诊断评分体系；
-- `render_iterative_summary()` 支持段落模式，内部将 `per_round_intervals` 展平成统一序列，便于输出全局资本演化轨迹；
+- `render_iterative_summary()` 支持段落与字符模式，内部将 `per_round_intervals` 展平成统一序列，便于输出全局资本演化轨迹；
 - 章节模式仍按原逻辑运行，保证旧脚本无感知升级。
 
 ### 输出与快照

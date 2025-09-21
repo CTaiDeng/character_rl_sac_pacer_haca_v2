@@ -199,6 +199,13 @@ def _load_training_config() -> tuple[dict[str, Any], Path]:
         options = ["chapter", "paragraph", "character"]
     else:
         options = [str(option) for option in options]
+    character_teacher_interval = max(
+        0,
+        _as_int(
+            raw_config.get("character_teacher_interval"),
+            0,
+        ),
+    )
     config = {
         "reference_actions_path": reference_path,
         "reference_warmup_rounds": warmup_rounds,
@@ -207,6 +214,7 @@ def _load_training_config() -> tuple[dict[str, Any], Path]:
         "iteration_granularity_options": list(options),
         "paragraph_split_min_length": max(0, paragraph_min_length),
         "paragraph_merge_strategy": merge_strategy,
+        "character_teacher_interval": character_teacher_interval,
     }
     return config, config_path
 
@@ -1847,8 +1855,17 @@ class ArticleEnvironment:
         else:
             self._current_summary = self._capital.render_text(self._budget)
         self._last_metrics: MutableMapping[str, float] = {}
+        self._char_truth_pairs: list[str] = []
+        self._char_targets: list[str] = list(self._chapters) if self._iteration_mode == "character" else []
+        self._char_history = ""
 
-    def configure(self, chapters: Sequence[str], *, iteration_mode: str | None = None) -> None:
+    def configure(
+            self,
+            chapters: Sequence[str],
+            *,
+            iteration_mode: str | None = None,
+            char_pairs: Sequence[str] | None = None,
+    ) -> None:
         """Reset the environment to operate over ``chapters`` with optional mode."""
 
         segments = list(chapters)
@@ -1857,6 +1874,21 @@ class ArticleEnvironment:
         self._chapters = segments
         if iteration_mode is not None:
             self._iteration_mode = iteration_mode
+        if self._iteration_mode == "character":
+            if char_pairs is None:
+                raise ValueError("Character mode requires char_pairs data.")
+            self._char_truth_pairs = list(char_pairs)
+            self._char_targets = list(segments)
+            if len(self._char_truth_pairs) < len(self._char_targets):
+                missing = len(self._char_targets) - len(self._char_truth_pairs)
+                self._char_truth_pairs.extend(
+                    [self._char_truth_pairs[-1] if self._char_truth_pairs else "  "] * missing
+                )
+            elif len(self._char_truth_pairs) > len(self._char_targets):
+                self._char_truth_pairs = self._char_truth_pairs[: len(self._char_targets)]
+        else:
+            self._char_truth_pairs = []
+            self._char_targets = []
         self._word_checker = WordComplianceChecker(self._chapters)
         self._valuator = CapitalValuator(self._chapters)
         self.reset()
@@ -1868,10 +1900,19 @@ class ArticleEnvironment:
         self._cumulative_cost = 0.0
         self._last_metrics = {}
         if self._iteration_mode == "character":
-            self._char_history = ""
-            self._current_summary = ""
-        else:
-            self._current_summary = self._capital.render_text(self._budget)
+            if not self._chapters:
+                self._char_history = ""
+                self._current_summary = ""
+                return TextObservation("", "", 1)
+            if self._char_truth_pairs:
+                self._char_history = self._char_truth_pairs[0]
+                self._current_summary = self._char_truth_pairs[0]
+            else:
+                self._char_history = ""
+                self._current_summary = ""
+            first_target = self._chapters[0] if self._chapters else ""
+            return TextObservation(self._current_summary, first_target, 1)
+        self._current_summary = self._capital.render_text(self._budget)
         return TextObservation(self._current_summary, self._chapters[0], 1)
 
     def step(self, action: TextAction) -> Transition:
@@ -1955,8 +1996,14 @@ class ArticleEnvironment:
         if self._iteration_mode == "character":
             predicted_char = canonical_summary[:1] if canonical_summary else ""
             self._char_history += predicted_char
-            next_summary = self._char_history
-            self._current_summary = next_summary
+            pair = self._char_history[-2:] if len(self._char_history) >= 2 else self._char_history
+            if not pair and self._char_truth_pairs:
+                pair = self._char_truth_pairs[min(self._cursor, len(self._char_truth_pairs) - 1)]
+            elif len(pair) < 2 and self._char_truth_pairs:
+                fallback_pair = self._char_truth_pairs[min(self._cursor, len(self._char_truth_pairs) - 1)]
+                pair = (pair + fallback_pair)[-2:]
+            next_summary = pair
+            self._current_summary = pair
         else:
             next_summary = self._capital.render_text(self._budget)
             self._current_summary = next_summary
@@ -2527,6 +2574,8 @@ class DemoTrainer(Trainer):
             reference_warmup_rounds: int = DEFAULT_REFERENCE_WARMUP_ROUNDS,
             reference_warmup_steps: int = DEFAULT_REFERENCE_WARMUP_STEPS,
             per_round_intervals: Sequence[Sequence[str]] | None = None,
+            char_pairs_per_round: Sequence[Sequence[str]] | None = None,
+            character_teacher_interval: int = 0,
     ) -> None:
         super().__init__(agent, environment, config, logger)
         self._intervals = list(intervals)
@@ -2540,8 +2589,15 @@ class DemoTrainer(Trainer):
             if per_round_intervals is not None
             else None
         )
+        self._char_pairs_per_round = (
+            [list(seq) for seq in char_pairs_per_round]
+            if char_pairs_per_round is not None
+            else None
+        )
+        self._character_teacher_interval = max(0, character_teacher_interval)
 
     def run(self, *, round_index: int = 1) -> None:
+        iteration_mode = getattr(self.environment, "_iteration_mode", "chapter")
         if self._per_round_intervals is not None:
             if 1 <= round_index <= len(self._per_round_intervals):
                 active_intervals = self._per_round_intervals[round_index - 1]
@@ -2551,9 +2607,24 @@ class DemoTrainer(Trainer):
             active_intervals = self._intervals
         if not active_intervals:
             raise ValueError("Active intervals cannot be empty for a training round.")
+        character_mode = iteration_mode.lower() == "character"
         if hasattr(self.environment, "configure"):
-            self.environment.configure(active_intervals)
+            if character_mode:
+                if not self._char_pairs_per_round:
+                    raise ValueError("Character mode requires char_pairs_per_round metadata.")
+                round_count = len(self._char_pairs_per_round)
+                index = (round_index - 1) % max(round_count, 1)
+                char_pairs = self._char_pairs_per_round[index]
+                self.environment.configure(
+                    active_intervals,
+                    iteration_mode="character",
+                    char_pairs=char_pairs,
+                )
+            else:
+                self.environment.configure(active_intervals)
         state = self.environment.reset()
+        iteration_mode = getattr(self.environment, "_iteration_mode", iteration_mode)
+        character_mode = iteration_mode.lower() == "character"
         total_steps = len(active_intervals)
         if self.config.total_steps != total_steps:
             print(
@@ -2588,21 +2659,30 @@ class DemoTrainer(Trainer):
 
             global_step = (round_index - 1) * total_steps + step
             reference_available = (
-                self._reference_actions
+                not character_mode
+                and self._reference_actions
                 and state.step_index in self._reference_actions
             )
             warmup_round_active = (
-                self._reference_warmup_rounds > 0
+                reference_available
+                and self._reference_warmup_rounds > 0
                 and round_index <= self._reference_warmup_rounds
             )
             warmup_step_active = (
-                self._reference_warmup_steps > 0
+                reference_available
+                and self._reference_warmup_steps > 0
                 and global_step <= self._reference_warmup_steps
             )
             use_reference = reference_available and (
                 warmup_round_active or warmup_step_active
             )
-            if use_reference:
+            teacher_interval = self._character_teacher_interval if character_mode else 0
+            use_teacher = character_mode and teacher_interval > 0 and (step % teacher_interval == 0)
+            if use_teacher:
+                reference_text = state.chapter_text
+                action = _create_text_action(reference_text, self.agent.tokenizer)
+                lines_to_print.append("           | action_source=teacher")
+            elif use_reference:
                 reference_text = self._reference_actions[state.step_index]
                 action = _create_text_action(reference_text, self.agent.tokenizer)
                 source_reason = "warmup-round" if warmup_round_active else "warmup-step"
@@ -3057,6 +3137,7 @@ def build_demo_components(
     granularity = str(training_config.get("iteration_granularity", "chapter")).lower()
     paragraph_min_length = int(training_config.get("paragraph_split_min_length", 0))
     merge_strategy = str(training_config.get("paragraph_merge_strategy", "preserve"))
+    char_pairs_per_round: list[list[str]] | None = None
     if granularity == "paragraph":
         paragraphs_by_chapter: list[list[str]] = []
         for chapter_text in chapters:
@@ -3091,32 +3172,41 @@ def build_demo_components(
         per_round_intervals = paragraphs_by_chapter
     elif granularity == "character":
         segments_by_chapter: list[list[str]] = []
+        char_pairs_by_chapter: list[list[str]] = []
         for chapter_text in chapters:
-            characters = [char for char in chapter_text]
-            characters = characters or [""]
-            segments_by_chapter.append(characters)
+            chars = list(chapter_text)
+            pairs: list[str] = []
+            targets: list[str] = []
+            if len(chars) >= 3:
+                for i in range(len(chars) - 2):
+                    pairs.append(chars[i] + chars[i + 1])
+                    targets.append(chars[i + 2])
+            elif len(chars) == 2:
+                pairs.append(chars[0] + chars[1])
+                targets.append(chars[1])
+            elif len(chars) == 1:
+                pairs.append(" " + chars[0])
+                targets.append(chars[0])
+            else:
+                pairs.append("  ")
+                targets.append(" ")
+            char_pairs_by_chapter.append(pairs)
+            segments_by_chapter.append(targets)
         environment_segments = [
             char
             for group in segments_by_chapter
             for char in group
         ]
+        if not environment_segments:
+            environment_segments = [" "]
         observations_for_seed = []
-        for chapter_idx, group in enumerate(segments_by_chapter, start=1):
-            for char in group:
-                observations_for_seed.append(
-                    TextObservation(
-                        previous_summary="",
-                        chapter_text=char,
-                        step_index=chapter_idx,
-                    )
-                )
-        if not observations_for_seed:
-            observations_for_seed = [TextObservation("", "", 1)]
         per_round_intervals = segments_by_chapter
+        char_pairs_per_round = char_pairs_by_chapter
     else:
         environment_segments = list(chapters)
         observations_for_seed = observations
         per_round_intervals = None
+        char_pairs_per_round = None
     tokenizer_corpus = list(environment_segments)
     tokenizer_corpus.extend(reference_actions.values())
     tokenizer_corpus.append(CognitiveCapital().render_text(DEFAULT_INITIAL_BUDGET))
@@ -3149,6 +3239,7 @@ def build_demo_components(
         lexical_tokenizer=lexical_tokenizer,
         initial_budget=DEFAULT_INITIAL_BUDGET,
         cost_weight=COST_WEIGHT,
+        iteration_mode=granularity,
     )
     replay_buffer = SimpleReplayBuffer(capacity)
     seeded_samples = _seed_replay_buffer_with_templates(
@@ -3206,6 +3297,8 @@ def build_demo_components(
         reference_warmup_rounds=training_config["reference_warmup_rounds"],
         reference_warmup_steps=training_config["reference_warmup_steps"],
         per_round_intervals=per_round_intervals,
+        char_pairs_per_round=char_pairs_per_round,
+        character_teacher_interval=training_config["character_teacher_interval"],
     )
     return agent, trainer
 
