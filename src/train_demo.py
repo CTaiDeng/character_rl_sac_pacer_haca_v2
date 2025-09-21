@@ -2503,6 +2503,17 @@ class DemoTrainer(Trainer):
                 "lexical_cosine": metrics.get("lexical_cosine", 0.0),
                 "lexical_js_similarity": metrics.get("lexical_js_similarity", 0.0),
                 "lexical_token_count": metrics.get("lexical_token_count", 0.0),
+                "capital_value": metrics.get("capital_value", 0.0),
+                "capital_coverage": metrics.get("capital_coverage", 0.0),
+                "capital_diversity": metrics.get("capital_diversity", 0.0),
+                "capital_redundancy": metrics.get("capital_redundancy", 0.0),
+                "capital_verification_ratio": metrics.get("capital_verification_ratio", 0.0),
+                "capital_fact_count": metrics.get("capital_fact_count", 0.0),
+                "capital_operations": metrics.get("capital_operations", 0.0),
+                "operation_cost": metrics.get("operation_cost", 0.0),
+                "budget_remaining": metrics.get("budget_remaining", 0.0),
+                "budget_breach": metrics.get("budget_breach", 0.0),
+                "cumulative_cost": metrics.get("cumulative_cost", 0.0),
             }
             summary_line = (
                 f"           -> summary={summary_len:04d} chars \"{summary_preview}\""
