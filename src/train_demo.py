@@ -185,7 +185,7 @@ def _load_training_config() -> tuple[dict[str, Any], Path]:
         ),
     )
     granularity = str(raw_config.get("iteration_granularity", "chapter")).lower()
-    if granularity not in {"chapter", "paragraph"}:
+    if granularity not in {"chapter", "paragraph", "character"}:
         granularity = "chapter"
     paragraph_min_length = _as_int(
         raw_config.get("paragraph_split_min_length"),
@@ -196,7 +196,7 @@ def _load_training_config() -> tuple[dict[str, Any], Path]:
     ).lower()
     options = raw_config.get("iteration_granularity_options")
     if not isinstance(options, (list, tuple)):
-        options = ["chapter", "paragraph"]
+        options = ["chapter", "paragraph", "character"]
     else:
         options = [str(option) for option in options]
     config = {
@@ -3031,7 +3031,7 @@ def build_demo_components(
     if not reference_actions_path.is_absolute():
         reference_actions_path = REPO_ROOT / reference_actions_path
     reference_actions = _load_reference_actions(reference_actions_path)
-    granularity = training_config.get("iteration_granularity", "chapter")
+    granularity = str(training_config.get("iteration_granularity", "chapter")).lower()
     paragraph_min_length = int(training_config.get("paragraph_split_min_length", 0))
     merge_strategy = str(training_config.get("paragraph_merge_strategy", "preserve"))
     if granularity == "paragraph":
@@ -3060,7 +3060,36 @@ def build_demo_components(
                         step_index=chapter_idx,
                     )
                 )
+        if not observations_for_seed:
+            observations_for_seed = [
+                TextObservation("", text, idx + 1)
+                for idx, text in enumerate(environment_segments)
+            ]
         per_round_intervals = paragraphs_by_chapter
+    elif granularity == "character":
+        segments_by_chapter: list[list[str]] = []
+        for chapter_text in chapters:
+            characters = [char for char in chapter_text]
+            characters = characters or [""]
+            segments_by_chapter.append(characters)
+        environment_segments = [
+            char
+            for group in segments_by_chapter
+            for char in group
+        ]
+        observations_for_seed = []
+        for chapter_idx, group in enumerate(segments_by_chapter, start=1):
+            for char in group:
+                observations_for_seed.append(
+                    TextObservation(
+                        previous_summary="",
+                        chapter_text=char,
+                        step_index=chapter_idx,
+                    )
+                )
+        if not observations_for_seed:
+            observations_for_seed = [TextObservation("", "", 1)]
+        per_round_intervals = segments_by_chapter
     else:
         environment_segments = list(chapters)
         observations_for_seed = observations

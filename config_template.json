@@ -3,7 +3,7 @@
   "reference_warmup_steps": 0,
   "reference_actions_path": "data/chapter_iterative_io_examples.txt",
   "iteration_granularity": "chapter",
-  "iteration_granularity_options": ["chapter", "paragraph"],
+  "iteration_granularity_options": ["chapter", "paragraph", "character"],
   "paragraph_split_min_length": 60,
   "paragraph_merge_strategy": "preserve"
 }
