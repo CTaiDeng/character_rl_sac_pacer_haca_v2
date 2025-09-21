@@ -126,8 +126,8 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 
-def _load_training_config() -> dict[str, Any]:
-    """Load training configuration from override or template files."""
+def _load_training_config() -> tuple[dict[str, Any], Path]:
+    """Load training configuration and return it with the source path."""
 
     if CONFIG_OVERRIDE_PATH.exists():
         config_path = CONFIG_OVERRIDE_PATH
@@ -147,6 +147,7 @@ def _load_training_config() -> dict[str, Any]:
             DEFAULT_REFERENCE_ACTIONS_PATH,
         )
     )
+
     def _as_int(value: Any, default: int) -> int:
         try:
             return int(value)
@@ -173,11 +174,25 @@ def _load_training_config() -> dict[str, Any]:
             DEFAULT_REFERENCE_WARMUP_STEPS,
         ),
     )
-    return {
+    config = {
         "reference_actions_path": reference_path,
         "reference_warmup_rounds": warmup_rounds,
         "reference_warmup_steps": warmup_steps,
     }
+    return config, config_path
+
+
+def _announce_training_config(config_path: Path, config: Mapping[str, Any]) -> None:
+    """Print the resolved configuration path and content."""
+
+    try:
+        display_path = config_path.relative_to(REPO_ROOT)
+    except ValueError:
+        display_path = config_path
+    _console_log(f"Training configuration file: {display_path}")
+    pretty = json.dumps(config, ensure_ascii=False, indent=2)
+    for line in pretty.splitlines():
+        _console_log(f"  {line}")
 
 try:  # pragma: no cover - exercised depending on invocation style
     from .rl_sac.agent import AgentConfig, SACAgent
@@ -2861,13 +2876,15 @@ def build_demo_components(
         precomputed: Sequence[TextObservation] | None = None,
         lexical_stats: ChapterLexicalStatistics | None = None,
         lexical_tokenizer: LexicalTokenizer | None = None,
+        training_config: Mapping[str, Any] | None = None,
 ) -> tuple[DemoSACAgent, DemoTrainer]:
     if precomputed is None:
         observations = load_article_features(article_path)
     else:
         observations = list(precomputed)
     chapters = [ob.chapter_text for ob in observations]
-    training_config = _load_training_config()
+    if training_config is None:
+        training_config, _ = _load_training_config()
     reference_actions_path = Path(
         training_config["reference_actions_path"]
     )
@@ -3032,7 +3049,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    training_config, config_path = _load_training_config()
     _reset_output_artifacts()
+    _announce_training_config(config_path, training_config)
     article_path = REPO_ROOT / "data" / "sample_article.txt"
     lexical_stats, lexical_tokenizer = _ensure_lexical_statistics(
         article_path, recompute=args.recompute_lexical_cache
@@ -3074,6 +3093,7 @@ def main() -> None:
         precomputed=observations,
         lexical_stats=lexical_stats,
         lexical_tokenizer=lexical_tokenizer,
+        training_config=training_config,
     )
     if args.post_round_updates is not None:
         trainer.config.updates_per_round = max(0, args.post_round_updates)
