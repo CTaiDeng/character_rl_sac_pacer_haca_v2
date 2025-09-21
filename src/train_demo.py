@@ -184,10 +184,29 @@ def _load_training_config() -> tuple[dict[str, Any], Path]:
             DEFAULT_REFERENCE_WARMUP_STEPS,
         ),
     )
+    granularity = str(raw_config.get("iteration_granularity", "chapter")).lower()
+    if granularity not in {"chapter", "paragraph"}:
+        granularity = "chapter"
+    paragraph_min_length = _as_int(
+        raw_config.get("paragraph_split_min_length"),
+        0,
+    )
+    merge_strategy = str(
+        raw_config.get("paragraph_merge_strategy", "preserve")
+    ).lower()
+    options = raw_config.get("iteration_granularity_options")
+    if not isinstance(options, (list, tuple)):
+        options = ["chapter", "paragraph"]
+    else:
+        options = [str(option) for option in options]
     config = {
         "reference_actions_path": reference_path,
         "reference_warmup_rounds": warmup_rounds,
         "reference_warmup_steps": warmup_steps,
+        "iteration_granularity": granularity,
+        "iteration_granularity_options": list(options),
+        "paragraph_split_min_length": max(0, paragraph_min_length),
+        "paragraph_merge_strategy": merge_strategy,
     }
     return config, config_path
 
@@ -1610,6 +1629,41 @@ def load_article_features(path: Path) -> List[TextObservation]:
     return observations
 
 
+def _split_into_paragraphs(
+        chapter_text: str,
+        *,
+        min_length: int = 0,
+        merge_strategy: str = "preserve",
+) -> list[str]:
+    """Split ``chapter_text`` into paragraphs with optional minimum length merging."""
+
+    raw_paragraphs = [
+        segment.strip()
+        for segment in re.split(r"\n\s*\n", chapter_text)
+        if segment.strip()
+    ]
+    if not raw_paragraphs:
+        return [chapter_text.strip()] if chapter_text.strip() else [chapter_text]
+    paragraphs: list[str] = []
+    buffer = ""
+    threshold = max(0, min_length)
+    for segment in raw_paragraphs:
+        candidate = segment
+        if buffer:
+            candidate = buffer + "\n" + candidate
+        if len(candidate) < threshold and merge_strategy != "strict":
+            buffer = candidate
+            continue
+        paragraphs.append(candidate)
+        buffer = ""
+    if buffer:
+        if paragraphs and merge_strategy == "preserve":
+            paragraphs[-1] = paragraphs[-1] + "\n" + buffer
+        else:
+            paragraphs.append(buffer)
+    return paragraphs
+
+
 def _resolve_lexical_stats_path(article_path: Path) -> Path | None:
     stats_filename = f"{article_path.stem}{LEXICAL_STATS_SUFFIX}"
     candidates = [
@@ -1787,6 +1841,17 @@ class ArticleEnvironment:
         self._cumulative_cost = 0.0
         self._current_summary = self._capital.render_text(self._budget)
         self._last_metrics: MutableMapping[str, float] = {}
+
+    def configure(self, chapters: Sequence[str]) -> None:
+        """Reset the environment to operate over ``chapters``."""
+
+        segments = list(chapters)
+        if not segments:
+            raise ValueError("The environment requires at least one segment.")
+        self._chapters = segments
+        self._word_checker = WordComplianceChecker(self._chapters)
+        self._valuator = CapitalValuator(self._chapters)
+        self.reset()
 
     def reset(self) -> TextObservation:
         self._cursor = 0
@@ -2438,6 +2503,7 @@ class DemoTrainer(Trainer):
             reference_actions: Mapping[int, str] | None = None,
             reference_warmup_rounds: int = DEFAULT_REFERENCE_WARMUP_ROUNDS,
             reference_warmup_steps: int = DEFAULT_REFERENCE_WARMUP_STEPS,
+            per_round_intervals: Sequence[Sequence[str]] | None = None,
     ) -> None:
         super().__init__(agent, environment, config, logger)
         self._intervals = list(intervals)
@@ -2446,10 +2512,26 @@ class DemoTrainer(Trainer):
         self._reference_actions = dict(reference_actions or {})
         self._reference_warmup_rounds = max(0, reference_warmup_rounds)
         self._reference_warmup_steps = max(0, reference_warmup_steps)
+        self._per_round_intervals = (
+            [list(seq) for seq in per_round_intervals]
+            if per_round_intervals is not None
+            else None
+        )
 
     def run(self, *, round_index: int = 1) -> None:
+        if self._per_round_intervals is not None:
+            if 1 <= round_index <= len(self._per_round_intervals):
+                active_intervals = self._per_round_intervals[round_index - 1]
+            else:
+                active_intervals = self._per_round_intervals[-1]
+        else:
+            active_intervals = self._intervals
+        if not active_intervals:
+            raise ValueError("Active intervals cannot be empty for a training round.")
+        if hasattr(self.environment, "configure"):
+            self.environment.configure(active_intervals)
         state = self.environment.reset()
-        total_steps = len(self._intervals)
+        total_steps = len(active_intervals)
         if self.config.total_steps != total_steps:
             print(
                 "Adjusting total steps to match interval segments: "
@@ -2734,15 +2816,23 @@ class DemoTrainer(Trainer):
     def render_iterative_summary(self) -> List[str]:
         """Render iterative capital accrual generated by the deterministic policy."""
 
+        if self._per_round_intervals:
+            intervals_sequence = [
+                segment
+                for group in self._per_round_intervals
+                for segment in group
+            ]
+        else:
+            intervals_sequence = list(self._intervals)
         initial_budget = getattr(self.environment, "_initial_budget", DEFAULT_INITIAL_BUDGET)
-        valuator = getattr(self.environment, "_valuator", CapitalValuator(self._intervals))
+        valuator = getattr(self.environment, "_valuator", CapitalValuator(intervals_sequence))
         capital = CognitiveCapital()
         budget = float(initial_budget)
         cumulative_cost = 0.0
         rendered_iterations: List[str] = [
-            f"Iteration 00 | capital_value=0.000 budget={budget:.1f} | <empty>"
+            f"Iteration 00 | capital_value=0.000000 budget={budget:.1f} | <empty>"
         ]
-        for idx, chapter in enumerate(self._intervals, start=1):
+        for idx, chapter in enumerate(intervals_sequence, start=1):
             observation = TextObservation(
                 previous_summary=capital.render_text(budget),
                 chapter_text=chapter,
@@ -2763,11 +2853,11 @@ class DemoTrainer(Trainer):
             preview_source = action.text.replace("\n", " ")
             preview = preview_source[:48] + ("..." if len(preview_source) > 48 else "")
             rendered_iterations.append(
-            f"Iteration {idx:02d} | capital_value={capital_value:.6f} "
-            f"budget={budget:.1f} cost={step_cost:.2f} "
-            f"coverage={capital_metrics['coverage']:.6f} "
-            f"diversity={capital_metrics['diversity']:.6f} "
-            f"redundancy={capital_metrics['redundancy']:.6f} | {preview}"
+                f"Iteration {idx:02d} | capital_value={capital_value:.6f} "
+                f"budget={budget:.1f} cost={step_cost:.2f} "
+                f"coverage={capital_metrics['coverage']:.6f} "
+                f"diversity={capital_metrics['diversity']:.6f} "
+                f"redundancy={capital_metrics['redundancy']:.6f} | {preview}"
             )
         return rendered_iterations
 
@@ -2941,7 +3031,41 @@ def build_demo_components(
     if not reference_actions_path.is_absolute():
         reference_actions_path = REPO_ROOT / reference_actions_path
     reference_actions = _load_reference_actions(reference_actions_path)
-    tokenizer_corpus = list(chapters)
+    granularity = training_config.get("iteration_granularity", "chapter")
+    paragraph_min_length = int(training_config.get("paragraph_split_min_length", 0))
+    merge_strategy = str(training_config.get("paragraph_merge_strategy", "preserve"))
+    if granularity == "paragraph":
+        paragraphs_by_chapter: list[list[str]] = []
+        for chapter_text in chapters:
+            paragraphs = _split_into_paragraphs(
+                chapter_text,
+                min_length=paragraph_min_length,
+                merge_strategy=merge_strategy,
+            )
+            paragraphs_by_chapter.append(paragraphs or [chapter_text])
+        environment_segments = [
+            paragraph
+            for group in paragraphs_by_chapter
+            for paragraph in group
+        ]
+        if not environment_segments:
+            environment_segments = list(chapters)
+        observations_for_seed: list[TextObservation] = []
+        for chapter_idx, group in enumerate(paragraphs_by_chapter, start=1):
+            for paragraph in group:
+                observations_for_seed.append(
+                    TextObservation(
+                        previous_summary="",
+                        chapter_text=paragraph,
+                        step_index=chapter_idx,
+                    )
+                )
+        per_round_intervals = paragraphs_by_chapter
+    else:
+        environment_segments = list(chapters)
+        observations_for_seed = observations
+        per_round_intervals = None
+    tokenizer_corpus = list(environment_segments)
     tokenizer_corpus.extend(reference_actions.values())
     tokenizer_corpus.append(CognitiveCapital().render_text(DEFAULT_INITIAL_BUDGET))
     common_charset = _compute_common_summary_charset(article_path)
@@ -2967,7 +3091,7 @@ def build_demo_components(
             print(f"警告：未找到 {stats_name}，词频奖励将被禁用。")
     max_summary_length = max(64, min(512, max(len(chapter) for chapter in chapters)))
     environment = ArticleEnvironment(
-        chapters,
+        environment_segments,
         tokenizer=tokenizer,
         lexical_statistics=lexical_stats,
         lexical_tokenizer=lexical_tokenizer,
@@ -2979,8 +3103,8 @@ def build_demo_components(
         environment,
         replay_buffer,
         tokenizer,
-        observations,
-        max_seed_steps=min(4, len(observations)),
+        observations_for_seed,
+        max_seed_steps=min(4, len(observations_for_seed)),
     )
     if seeded_samples:
         _console_log(
@@ -3011,7 +3135,7 @@ def build_demo_components(
         update_batch_size=1,
         device='cpu',
     )
-    steps_per_round = len(chapters)
+    steps_per_round = len(environment_segments)
     trainer_config = TrainerConfig(
         total_steps=steps_per_round,
         warmup_steps=0,
@@ -3023,10 +3147,11 @@ def build_demo_components(
         agent,
         environment,
         trainer_config,
-        intervals=chapters,
+        intervals=environment_segments,
         reference_actions=reference_actions,
         reference_warmup_rounds=training_config["reference_warmup_rounds"],
         reference_warmup_steps=training_config["reference_warmup_steps"],
+        per_round_intervals=per_round_intervals,
     )
     return agent, trainer
 
