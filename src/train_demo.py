@@ -20,6 +20,7 @@ import re
 import statistics
 import subprocess
 import sys
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,12 +65,21 @@ SRC_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = SRC_ROOT.parent
 OUT_DIR = REPO_ROOT / "out"
 COMPUTE_TFIDF_SCRIPT = REPO_ROOT / "scripts" / "compute_chapter_tfidf.py"
-STEP_CSV_PATH = OUT_DIR / "step_metrics.csv"
-ROUND_CSV_PATH = OUT_DIR / "round_metrics.csv"
-REWARDS_HTML_PATH = OUT_DIR / "rewards.html"
-ROUND_SNAPSHOT_DIR = OUT_DIR / "round_snapshots"
-STEP_LOG_PATH = OUT_DIR / "training_step.log"
-TRAIN_LOG_PATH = OUT_DIR / "training_output.log"
+STEP_CSV_FILENAME = "step_metrics.csv"
+ROUND_CSV_FILENAME = "round_metrics.csv"
+REWARDS_HTML_FILENAME = "rewards.html"
+ROUND_SNAPSHOT_DIRNAME = "round_snapshots"
+STEP_LOG_FILENAME = "training_step.log"
+TRAIN_LOG_FILENAME = "training_output.log"
+
+# Run-scoped output paths; will be updated per training run.
+RUN_DIR = OUT_DIR
+STEP_CSV_PATH = RUN_DIR / STEP_CSV_FILENAME
+ROUND_CSV_PATH = RUN_DIR / ROUND_CSV_FILENAME
+REWARDS_HTML_PATH = RUN_DIR / REWARDS_HTML_FILENAME
+ROUND_SNAPSHOT_DIR = RUN_DIR / ROUND_SNAPSHOT_DIRNAME
+STEP_LOG_PATH = RUN_DIR / STEP_LOG_FILENAME
+TRAIN_LOG_PATH = RUN_DIR / TRAIN_LOG_FILENAME
 CONFIG_TEMPLATE_PATH = REPO_ROOT / "config_template.json"
 CONFIG_OVERRIDE_PATH = REPO_ROOT / "res" / "config.json"
 DEFAULT_REFERENCE_ACTIONS_PATH = "data/chapter_iterative_io_examples.txt"
@@ -193,6 +203,36 @@ def _announce_training_config(config_path: Path, config: Mapping[str, Any]) -> N
     pretty = json.dumps(config, ensure_ascii=False, indent=2)
     for line in pretty.splitlines():
         _console_log(f"  {line}")
+
+
+def _configure_run_paths(run_dir: Path) -> None:
+    """Update global output paths to point into ``run_dir``."""
+
+    global RUN_DIR, STEP_CSV_PATH, ROUND_CSV_PATH, REWARDS_HTML_PATH
+    global ROUND_SNAPSHOT_DIR, STEP_LOG_PATH, TRAIN_LOG_PATH
+
+    RUN_DIR = run_dir
+    STEP_CSV_PATH = RUN_DIR / STEP_CSV_FILENAME
+    ROUND_CSV_PATH = RUN_DIR / ROUND_CSV_FILENAME
+    REWARDS_HTML_PATH = RUN_DIR / REWARDS_HTML_FILENAME
+    ROUND_SNAPSHOT_DIR = RUN_DIR / ROUND_SNAPSHOT_DIRNAME
+    STEP_LOG_PATH = RUN_DIR / STEP_LOG_FILENAME
+    TRAIN_LOG_PATH = RUN_DIR / TRAIN_LOG_FILENAME
+
+
+def _initialize_run_paths() -> Path:
+    """Create a timestamped run directory and configure output paths."""
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = time.time_ns() // 1_000_000
+    run_dir = OUT_DIR / f"train_{timestamp}"
+    while run_dir.exists():
+        timestamp += 1
+        run_dir = OUT_DIR / f"train_{timestamp}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _configure_run_paths(run_dir)
+    ROUND_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 try:  # pragma: no cover - exercised depending on invocation style
     from .rl_sac.agent import AgentConfig, SACAgent
@@ -1134,7 +1174,7 @@ def _nonlinear_reward(value: float, exponent: float) -> float:
 def _append_csv_row(path: Path, headers: Sequence[str], row: Mapping[str, Any]) -> None:
     """Append ``row`` to ``path`` ensuring headers are written once."""
 
-    OUT_DIR.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not path.exists()
     with path.open("a", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(headers))
@@ -1147,15 +1187,16 @@ def _append_csv_row(path: Path, headers: Sequence[str], row: Mapping[str, Any]) 
 def _reset_output_artifacts() -> None:
     """Remove stale CSV/HTML/snapshot artifacts before a new training session."""
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
     for path in (STEP_CSV_PATH, ROUND_CSV_PATH, REWARDS_HTML_PATH, STEP_LOG_PATH, TRAIN_LOG_PATH):
+        path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             path.unlink()
     if ROUND_SNAPSHOT_DIR.exists():
         for snapshot in ROUND_SNAPSHOT_DIR.glob("*.json"):
             if snapshot.is_file():
                 snapshot.unlink()
-    ROUND_SNAPSHOT_DIR.mkdir(exist_ok=True)
+    ROUND_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -1206,7 +1247,6 @@ ANSI_REWARD_TAGS = {
 def _append_step_log(lines: Sequence[str], block_color: str) -> None:
     if not lines:
         return
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
     STEP_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     tag = ANSI_REWARD_TAGS.get(block_color, "[reward] ")
     with STEP_LOG_PATH.open("a", encoding="utf-8") as handle:
@@ -1222,7 +1262,6 @@ def _console_log(message: str, *, color: str | None = None, log: bool = True) ->
     else:
         print(message)
     if log:
-        OUT_DIR.mkdir(parents=True, exist_ok=True)
         TRAIN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with TRAIN_LOG_PATH.open("a", encoding="utf-8") as handle:
             handle.write(f"{message}\n")
@@ -3061,6 +3100,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     training_config, config_path = _load_training_config()
+    run_dir = _initialize_run_paths()
+    try:
+        display_run_dir = run_dir.relative_to(REPO_ROOT)
+    except ValueError:
+        display_run_dir = run_dir
+    _console_log(f"Training run directory: {display_run_dir}")
     _reset_output_artifacts()
     _announce_training_config(config_path, training_config)
     article_path = REPO_ROOT / "data" / "sample_article.txt"
@@ -3133,7 +3178,7 @@ def main() -> None:
     for line in trainer.render_iterative_summary():
         _console_log(f"  {line}")
 
-    snapshot_path = OUT_DIR / "demo_agent_snapshot.json"
+    snapshot_path = RUN_DIR / "demo_agent_snapshot.json"
     snapshot_metadata = {
         "steps_per_round": trainer.config.total_steps,
         "post_round_updates": trainer.config.updates_per_round,
@@ -3143,7 +3188,7 @@ def main() -> None:
     snapshot = save_agent_snapshot(agent, snapshot_metadata, snapshot_path)
     _console_log(f"Saved demo agent snapshot to {snapshot_path.relative_to(REPO_ROOT)}")
 
-    model_path = OUT_DIR / "demo_agent_model.bin"
+    model_path = RUN_DIR / "demo_agent_model.bin"
     save_model_artifact(model_path, snapshot["model_size_bytes"])
     _console_log(
         "Saved demo agent model to "
