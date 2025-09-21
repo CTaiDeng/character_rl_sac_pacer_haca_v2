@@ -70,6 +70,11 @@ REWARDS_HTML_PATH = OUT_DIR / "rewards.html"
 ROUND_SNAPSHOT_DIR = OUT_DIR / "round_snapshots"
 STEP_LOG_PATH = OUT_DIR / "training_step.log"
 TRAIN_LOG_PATH = OUT_DIR / "training_output.log"
+CONFIG_TEMPLATE_PATH = REPO_ROOT / "config_template.json"
+CONFIG_OVERRIDE_PATH = REPO_ROOT / "res" / "config.json"
+DEFAULT_REFERENCE_ACTIONS_PATH = "data/chapter_iterative_io_examples.txt"
+DEFAULT_REFERENCE_WARMUP_ROUNDS = 0
+DEFAULT_REFERENCE_WARMUP_STEPS = 5
 
 STEP_CSV_HEADERS = [
     "round",
@@ -119,6 +124,60 @@ ROUND_CSV_HEADERS = [
 MODEL_SIZE_BYTES = 209_460_851
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+
+def _load_training_config() -> dict[str, Any]:
+    """Load training configuration from override or template files."""
+
+    if CONFIG_OVERRIDE_PATH.exists():
+        config_path = CONFIG_OVERRIDE_PATH
+    else:
+        config_path = CONFIG_TEMPLATE_PATH
+    raw_config: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            raw_config = dict(loaded)
+    reference_path = str(
+        raw_config.get(
+            "reference_actions_path",
+            DEFAULT_REFERENCE_ACTIONS_PATH,
+        )
+    )
+    def _as_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    warmup_rounds = max(
+        0,
+        _as_int(
+            raw_config.get(
+                "reference_warmup_rounds",
+                DEFAULT_REFERENCE_WARMUP_ROUNDS,
+            ),
+            DEFAULT_REFERENCE_WARMUP_ROUNDS,
+        ),
+    )
+    warmup_steps = max(
+        0,
+        _as_int(
+            raw_config.get(
+                "reference_warmup_steps",
+                DEFAULT_REFERENCE_WARMUP_STEPS,
+            ),
+            DEFAULT_REFERENCE_WARMUP_STEPS,
+        ),
+    )
+    return {
+        "reference_actions_path": reference_path,
+        "reference_warmup_rounds": warmup_rounds,
+        "reference_warmup_steps": warmup_steps,
+    }
 
 try:  # pragma: no cover - exercised depending on invocation style
     from .rl_sac.agent import AgentConfig, SACAgent
@@ -2273,11 +2332,17 @@ class DemoTrainer(Trainer):
             *,
             intervals: Sequence[str],
             logger: MutableMapping[str, Any] | None = None,
+            reference_actions: Mapping[int, str] | None = None,
+            reference_warmup_rounds: int = DEFAULT_REFERENCE_WARMUP_ROUNDS,
+            reference_warmup_steps: int = DEFAULT_REFERENCE_WARMUP_STEPS,
     ) -> None:
         super().__init__(agent, environment, config, logger)
         self._intervals = list(intervals)
         if not self._intervals:
             raise ValueError("Intervals cannot be empty for the trainer.")
+        self._reference_actions = dict(reference_actions or {})
+        self._reference_warmup_rounds = max(0, reference_warmup_rounds)
+        self._reference_warmup_steps = max(0, reference_warmup_steps)
 
     def run(self, *, round_index: int = 1) -> None:
         state = self.environment.reset()
@@ -2313,14 +2378,38 @@ class DemoTrainer(Trainer):
                 f"           | source={source_len:04d} chars \"{source_preview}\""
             )
 
-            action = self.agent.act(state)
+            global_step = (round_index - 1) * total_steps + step
+            reference_available = (
+                self._reference_actions
+                and state.step_index in self._reference_actions
+            )
+            warmup_round_active = (
+                self._reference_warmup_rounds > 0
+                and round_index <= self._reference_warmup_rounds
+            )
+            warmup_step_active = (
+                self._reference_warmup_steps > 0
+                and global_step <= self._reference_warmup_steps
+            )
+            use_reference = reference_available and (
+                warmup_round_active or warmup_step_active
+            )
+            if use_reference:
+                reference_text = self._reference_actions[state.step_index]
+                action = _create_text_action(reference_text, self.agent.tokenizer)
+                source_reason = "warmup-round" if warmup_round_active else "warmup-step"
+                lines_to_print.append(
+                    f"           | action_source=reference-template ({source_reason})"
+                )
+            else:
+                action = self.agent.act(state)
+                lines_to_print.append("           | action_source=policy")
             transition = self.environment.step(action)
             self.agent.record(transition)
             metrics = self.environment.last_metrics
 
             summary_len, summary_preview = _format_text_debug(action.text, 20, 20)
             total_reward += transition.reward
-            global_step = (round_index - 1) * total_steps + step
             log_metrics: MutableMapping[str, Any] = {
                 "reward": transition.reward,
                 "reward_base": metrics.get("reward_base", 0.0),
@@ -2652,6 +2741,37 @@ def _create_text_action(action_text: str, tokenizer: CharTokenizer) -> TextActio
     return TextAction(token_ids=token_ids, text=action_text, length=len(token_ids))
 
 
+def _load_reference_actions(path: Path) -> dict[int, str]:
+    if not path.exists():
+        return {}
+    chapter_pattern = re.compile(r"^Chapter\s+(\d{1,3})\b")
+    actions: dict[int, str] = {}
+    current_idx: int | None = None
+    buffer: list[str] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        match = chapter_pattern.match(raw_line)
+        if match:
+            if current_idx is not None and buffer:
+                actions[current_idx] = "\n".join(buffer).strip()
+            current_idx = int(match.group(1))
+            buffer = []
+            continue
+        if raw_line.startswith("  "):
+            stripped = raw_line.strip()
+            if stripped:
+                buffer.append(stripped)
+            continue
+        if buffer and raw_line.strip() == "":
+            # blank line denotes end of current block
+            if current_idx is not None:
+                actions[current_idx] = "\n".join(buffer).strip()
+            current_idx = None
+            buffer = []
+    if current_idx is not None and buffer:
+        actions[current_idx] = "\n".join(buffer).strip()
+    return actions
+
+
 def _seed_replay_buffer_with_templates(
         environment: ArticleEnvironment,
         replay_buffer: BaseReplayBuffer,
@@ -2751,6 +2871,13 @@ def build_demo_components(
         device='cpu',
     )
     steps_per_round = len(chapters)
+    training_config = _load_training_config()
+    reference_actions_path = Path(
+        training_config["reference_actions_path"]
+    )
+    if not reference_actions_path.is_absolute():
+        reference_actions_path = REPO_ROOT / reference_actions_path
+    reference_actions = _load_reference_actions(reference_actions_path)
     trainer_config = TrainerConfig(
         total_steps=steps_per_round,
         warmup_steps=0,
@@ -2763,6 +2890,9 @@ def build_demo_components(
         environment,
         trainer_config,
         intervals=chapters,
+        reference_actions=reference_actions,
+        reference_warmup_rounds=training_config["reference_warmup_rounds"],
+        reference_warmup_steps=training_config["reference_warmup_steps"],
     )
     return agent, trainer
 
