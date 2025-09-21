@@ -2848,16 +2848,17 @@ class DemoTrainer(Trainer):
                 f"soft={metrics.get('reward_soft_bonus', 0.0):+.6f}; {reward_quality})"
             )
 
-            stanza_lines.append(summary_line)
-            stanza_lines.extend(metric_lines)
-            stanza_lines.append(penalty_line)
-            _append_step_log(stanza_lines + [reward_line], block_color)
+            base_lines = stanza_lines + [summary_line]
+            log_lines = base_lines + metric_lines + [penalty_line]
+            _append_step_log(log_lines + [reward_line], block_color)
             if character_mode:
-                _console_log(reward_line, color=block_color)
-            else:
-                for stored_line in stanza_lines:
+                for stored_line in base_lines:
                     _console_log(stored_line, color=block_color)
-                _console_log(reward_line, color=block_color)
+                _console_log("", color=block_color)
+            else:
+                for stored_line in log_lines:
+                    _console_log(stored_line, color=block_color)
+            _console_log(reward_line, color=block_color)
 
             if log_metrics:
                 self.log(log_metrics, global_step)
