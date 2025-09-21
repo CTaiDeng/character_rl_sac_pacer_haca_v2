@@ -1256,8 +1256,8 @@ def _build_rewards_dashboard_html(
     if round_data:
         latest = round_data[-1]
         summary_text = (
-            "已记录 {count} 轮训练；最近一轮 (Round {round}) 总奖励 {total:.3f}，"
-            "平均奖励 {average:.3f}。"
+"已记录 {count} 轮训练；最近一轮 (Round {round}) 总奖励 {total:.6f}，"
+"平均奖励 {average:.6f}。"
         ).format(
             count=len(round_data),
             round=latest["round"],
@@ -1680,7 +1680,7 @@ def _run_inline_lexical_evaluation(
     def _fmt(items: Sequence[tuple[str, float]]) -> str:
         if not items:
             return '<none>'
-        return ', '.join(f'{token}:{score:.3f}' for token, score in items)
+    return ', '.join(f'{token}:{score:.6f}' for token, score in items)
 
     print(
         f"词频参考 | 章节 {chapter_index:02d} tokens={chapter_entry.token_count} "
@@ -2533,7 +2533,7 @@ class DemoTrainer(Trainer):
                 value = float(log_metrics.get(key, 0.0))
                 quality = _describe_metric_quality(key, value)
                 metric_lines.append(
-                    f"{metric_indent}{label}={value:.3f} （{description}；{quality}）"
+                    f"{metric_indent}{label}={value:.6f} （{description}；{quality}）"
                 )
 
             garbled_penalty = float(log_metrics["garbled_penalty"])
@@ -2545,7 +2545,7 @@ class DemoTrainer(Trainer):
                 ]
             )
             penalty_line = (
-                f"{metric_indent}penalties={garbled_penalty:.3f}/{word_penalty:.3f} "
+                f"{metric_indent}penalties={garbled_penalty:.6f}/{word_penalty:.6f} "
                 f"（乱码与词合规惩罚项，越高惩罚越重；{penalty_quality}）"
             )
 
@@ -2557,10 +2557,10 @@ class DemoTrainer(Trainer):
             else:
                 block_color = ANSI_YELLOW
             reward_line = (
-                f"{metric_indent}reward={transition.reward:.3f} "
-                f"(base={metrics.get('reward_base', 0.0):+.3f}, "
-                f"potential={metrics.get('reward_potential_gain', 0.0):+.3f}, "
-                f"soft={metrics.get('reward_soft_bonus', 0.0):+.3f}; {reward_quality})"
+                f"{metric_indent}reward={transition.reward:.6f} "
+                f"(base={metrics.get('reward_base', 0.0):+.6f}, "
+                f"potential={metrics.get('reward_potential_gain', 0.0):+.6f}, "
+                f"soft={metrics.get('reward_soft_bonus', 0.0):+.6f}; {reward_quality})"
             )
 
             lines_to_print.append(summary_line)
@@ -2713,11 +2713,11 @@ class DemoTrainer(Trainer):
             preview_source = action.text.replace("\n", " ")
             preview = preview_source[:48] + ("..." if len(preview_source) > 48 else "")
             rendered_iterations.append(
-                f"Iteration {idx:02d} | capital_value={capital_value:.3f} "
-                f"budget={budget:.1f} cost={step_cost:.2f} "
-                f"coverage={capital_metrics['coverage']:.2f} "
-                f"diversity={capital_metrics['diversity']:.2f} "
-                f"redundancy={capital_metrics['redundancy']:.2f} | {preview}"
+            f"Iteration {idx:02d} | capital_value={capital_value:.6f} "
+            f"budget={budget:.1f} cost={step_cost:.2f} "
+            f"coverage={capital_metrics['coverage']:.6f} "
+            f"diversity={capital_metrics['diversity']:.6f} "
+            f"redundancy={capital_metrics['redundancy']:.6f} | {preview}"
             )
         return rendered_iterations
 
@@ -2939,7 +2939,7 @@ def build_demo_components(
         for seed_index, (template_text, reward_value) in enumerate(seeded_samples, start=1):
             preview = template_text.splitlines()[0][:80]
             _console_log(
-                f"  Seed {seed_index:02d}: reward={reward_value:.3f} | {preview}"
+                f"  Seed {seed_index:02d}: reward={reward_value:.6f} | {preview}"
             )
     network_factory = DemoNetworkFactory(
         vocab_size=tokenizer.vocab_size,
