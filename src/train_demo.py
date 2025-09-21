@@ -1813,6 +1813,7 @@ class ArticleEnvironment:
             lexical_tokenizer: LexicalTokenizer | None = None,
             initial_budget: float = DEFAULT_INITIAL_BUDGET,
             cost_weight: float = COST_WEIGHT,
+            iteration_mode: str = "chapter",
     ) -> None:
         if not chapters:
             raise ValueError("The environment requires at least one chapter.")
@@ -1837,18 +1838,25 @@ class ArticleEnvironment:
         self._initial_budget = float(initial_budget)
         self._cost_weight = float(cost_weight)
         self._capital = CognitiveCapital()
+        self._iteration_mode = iteration_mode
         self._budget = self._initial_budget
         self._cumulative_cost = 0.0
-        self._current_summary = self._capital.render_text(self._budget)
+        self._char_history = ""
+        if self._iteration_mode == "character":
+            self._current_summary = ""
+        else:
+            self._current_summary = self._capital.render_text(self._budget)
         self._last_metrics: MutableMapping[str, float] = {}
 
-    def configure(self, chapters: Sequence[str]) -> None:
-        """Reset the environment to operate over ``chapters``."""
+    def configure(self, chapters: Sequence[str], *, iteration_mode: str | None = None) -> None:
+        """Reset the environment to operate over ``chapters`` with optional mode."""
 
         segments = list(chapters)
         if not segments:
             raise ValueError("The environment requires at least one segment.")
         self._chapters = segments
+        if iteration_mode is not None:
+            self._iteration_mode = iteration_mode
         self._word_checker = WordComplianceChecker(self._chapters)
         self._valuator = CapitalValuator(self._chapters)
         self.reset()
@@ -1859,7 +1867,11 @@ class ArticleEnvironment:
         self._budget = self._initial_budget
         self._cumulative_cost = 0.0
         self._last_metrics = {}
-        self._current_summary = self._capital.render_text(self._budget)
+        if self._iteration_mode == "character":
+            self._char_history = ""
+            self._current_summary = ""
+        else:
+            self._current_summary = self._capital.render_text(self._budget)
         return TextObservation(self._current_summary, self._chapters[0], 1)
 
     def step(self, action: TextAction) -> Transition:
@@ -1871,7 +1883,11 @@ class ArticleEnvironment:
         source_text = _combine_summary_and_chapter(
             state.previous_summary, state.chapter_text
         )
-        canonical_summary, operations = _canonicalize_action_text(action.text)
+        if self._iteration_mode == "character":
+            canonical_summary = action.text[:1] if action.text else ""
+            operations: list[Operation] = []
+        else:
+            canonical_summary, operations = _canonicalize_action_text(action.text)
         metrics = analyze_summary(
             canonical_summary,
             source_text,
@@ -1886,13 +1902,14 @@ class ArticleEnvironment:
         potential_before = self._valuator.potential(capital_before)
         step_cost = 0.0
         applied_operations = 0
-        for operation in operations:
-            op_kind = operation.kind.upper()
-            cost = OPERATION_COSTS.get(op_kind, DEFAULT_OPERATION_COST)
-            result = self._capital.apply(operation)
-            if result.get("applied", False):
-                applied_operations += 1
-            step_cost += cost
+        if self._iteration_mode != "character":
+            for operation in operations:
+                op_kind = operation.kind.upper()
+                cost = OPERATION_COSTS.get(op_kind, DEFAULT_OPERATION_COST)
+                result = self._capital.apply(operation)
+                if result.get("applied", False):
+                    applied_operations += 1
+                step_cost += cost
         self._budget -= step_cost
         self._cumulative_cost += step_cost
         budget_breach = max(0.0, -self._budget)
@@ -1935,8 +1952,14 @@ class ArticleEnvironment:
         soft_reward = quality_component + lexical_component - cleanliness_penalty
 
         reward = base_reward + potential_gain + soft_reward
-        next_summary = self._capital.render_text(self._budget)
-        self._current_summary = next_summary
+        if self._iteration_mode == "character":
+            predicted_char = canonical_summary[:1] if canonical_summary else ""
+            self._char_history += predicted_char
+            next_summary = self._char_history
+            self._current_summary = next_summary
+        else:
+            next_summary = self._capital.render_text(self._budget)
+            self._current_summary = next_summary
         self._cursor += 1
         if not done:
             next_state = TextObservation(
@@ -3144,6 +3167,8 @@ def build_demo_components(
             _console_log(
                 f"  Seed {seed_index:02d}: reward={reward_value:.6f} | {preview}"
             )
+    elif granularity == "character":
+        seeded_samples = []
     network_factory = DemoNetworkFactory(
         vocab_size=tokenizer.vocab_size,
         embedding_dim=96,
