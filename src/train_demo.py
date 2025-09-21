@@ -1857,7 +1857,7 @@ class ArticleEnvironment:
         self._last_metrics: MutableMapping[str, float] = {}
         self._char_truth_pairs: list[str] = []
         self._char_targets: list[str] = list(self._chapters) if self._iteration_mode == "character" else []
-        self._char_history = ""
+        self._force_truth_next = False
 
     def configure(
             self,
@@ -1879,6 +1879,7 @@ class ArticleEnvironment:
                 raise ValueError("Character mode requires char_pairs data.")
             self._char_truth_pairs = list(char_pairs)
             self._char_targets = list(segments)
+            self._force_truth_next = False
             if len(self._char_truth_pairs) < len(self._char_targets):
                 missing = len(self._char_targets) - len(self._char_truth_pairs)
                 self._char_truth_pairs.extend(
@@ -1889,6 +1890,7 @@ class ArticleEnvironment:
         else:
             self._char_truth_pairs = []
             self._char_targets = []
+            self._force_truth_next = False
         self._word_checker = WordComplianceChecker(self._chapters)
         self._valuator = CapitalValuator(self._chapters)
         self.reset()
@@ -1899,6 +1901,7 @@ class ArticleEnvironment:
         self._budget = self._initial_budget
         self._cumulative_cost = 0.0
         self._last_metrics = {}
+        self._force_truth_next = False
         if self._iteration_mode == "character":
             if not self._chapters:
                 self._char_history = ""
@@ -1915,15 +1918,27 @@ class ArticleEnvironment:
         self._current_summary = self._capital.render_text(self._budget)
         return TextObservation(self._current_summary, self._chapters[0], 1)
 
+    def set_force_truth_pair(self, value: bool) -> None:
+        if self._iteration_mode == "character":
+            self._force_truth_next = bool(value)
+
+    def override_current_summary(self, summary: str) -> None:
+        if self._iteration_mode == "character":
+            self._current_summary = summary
+            self._char_history = summary[-2:]
+
     def step(self, action: TextAction) -> Transition:
         state = TextObservation(
             previous_summary=self._current_summary,
             chapter_text=self._chapters[self._cursor],
             step_index=self._cursor + 1,
         )
-        source_text = _combine_summary_and_chapter(
-            state.previous_summary, state.chapter_text
-        )
+        if self._iteration_mode == "character":
+            source_text = state.previous_summary + state.chapter_text
+        else:
+            source_text = _combine_summary_and_chapter(
+                state.previous_summary, state.chapter_text
+            )
         if self._iteration_mode == "character":
             canonical_summary = action.text[:1] if action.text else ""
             operations: list[Operation] = []
@@ -1995,15 +2010,17 @@ class ArticleEnvironment:
         reward = base_reward + potential_gain + soft_reward
         if self._iteration_mode == "character":
             predicted_char = canonical_summary[:1] if canonical_summary else ""
-            self._char_history += predicted_char
-            pair = self._char_history[-2:] if len(self._char_history) >= 2 else self._char_history
-            if not pair and self._char_truth_pairs:
-                pair = self._char_truth_pairs[min(self._cursor, len(self._char_truth_pairs) - 1)]
-            elif len(pair) < 2 and self._char_truth_pairs:
-                fallback_pair = self._char_truth_pairs[min(self._cursor, len(self._char_truth_pairs) - 1)]
-                pair = (pair + fallback_pair)[-2:]
-            next_summary = pair
-            self._current_summary = pair
+            self._char_history = (self._char_history + predicted_char)[-2:]
+            next_pair = self._char_history
+            if (
+                    self._force_truth_next
+                    and self._char_truth_pairs
+                    and self._cursor < len(self._char_truth_pairs) - 1
+            ):
+                next_pair = self._char_truth_pairs[self._cursor + 1]
+                self._char_history = next_pair
+            self._current_summary = next_pair
+            self._force_truth_next = False
         else:
             next_summary = self._capital.render_text(self._budget)
             self._current_summary = next_summary
@@ -2608,6 +2625,7 @@ class DemoTrainer(Trainer):
         if not active_intervals:
             raise ValueError("Active intervals cannot be empty for a training round.")
         character_mode = iteration_mode.lower() == "character"
+        char_pairs: Sequence[str] | None = None
         if hasattr(self.environment, "configure"):
             if character_mode:
                 if not self._char_pairs_per_round:
@@ -2625,6 +2643,7 @@ class DemoTrainer(Trainer):
         state = self.environment.reset()
         iteration_mode = getattr(self.environment, "_iteration_mode", iteration_mode)
         character_mode = iteration_mode.lower() == "character"
+        round_pairs = list(char_pairs) if character_mode and char_pairs is not None else None
         total_steps = len(active_intervals)
         if self.config.total_steps != total_steps:
             print(
@@ -2635,28 +2654,6 @@ class DemoTrainer(Trainer):
         print(f"=== Training round {round_index} | steps={total_steps} ===")
         total_reward = 0.0
         for step in range(1, total_steps + 1):
-            prev_len, prev_preview = _format_text_debug(state.previous_summary, 20, 20)
-            chapter_len, chapter_preview = _format_text_debug(state.chapter_text, 20, 20)
-            source_text = _combine_summary_and_chapter(
-                state.previous_summary, state.chapter_text
-            )
-            source_len, source_preview = _format_text_debug(source_text, 20, 20)
-            block_color = ANSI_YELLOW
-
-            def _colorize(line: str) -> str:
-                return f"{block_color}{line}{ANSI_RESET}"
-
-            lines_to_print: list[str] = []
-            lines_to_print.append(
-                f"  Step {step:02d} | prev_summary={prev_len:04d} chars \"{prev_preview}\""
-            )
-            lines_to_print.append(
-                f"           | chapter={chapter_len:04d} chars \"{chapter_preview}\""
-            )
-            lines_to_print.append(
-                f"           | source={source_len:04d} chars \"{source_preview}\""
-            )
-
             global_step = (round_index - 1) * total_steps + step
             reference_available = (
                 not character_mode
@@ -2678,29 +2675,82 @@ class DemoTrainer(Trainer):
             )
             teacher_interval = self._character_teacher_interval if character_mode else 0
             use_teacher = character_mode and teacher_interval > 0 and (step % teacher_interval == 0)
+            if character_mode:
+                truth_pair = (
+                    round_pairs[step - 1]
+                    if round_pairs and step - 1 < len(round_pairs)
+                    else state.previous_summary
+                )
+                if use_teacher:
+                    if hasattr(self.environment, "override_current_summary"):
+                        self.environment.override_current_summary(truth_pair)
+                    if hasattr(self.environment, "set_force_truth_pair"):
+                        self.environment.set_force_truth_pair(True)
+                    state = TextObservation(truth_pair, state.chapter_text, state.step_index)
+                else:
+                    if hasattr(self.environment, "set_force_truth_pair"):
+                        self.environment.set_force_truth_pair(False)
+
+            if character_mode:
+                sanitized_prev = state.previous_summary
+                sanitized_chapter = state.chapter_text
+                source_text = state.previous_summary + state.chapter_text
+                source_preview_text = source_text
+            else:
+                sanitized_prev = state.previous_summary.replace("\n", "\\n")
+                sanitized_chapter = state.chapter_text.replace("\n", "\\n")
+                source_text = _combine_summary_and_chapter(
+                    state.previous_summary, state.chapter_text
+                )
+                source_preview_text = source_text.replace("\n", "\\n")
+            prev_len, prev_preview = _format_text_debug(sanitized_prev, 20, 20)
+            chapter_len, chapter_preview = _format_text_debug(sanitized_chapter, 20, 20)
+            source_len, source_preview = _format_text_debug(source_preview_text, 20, 20)
+            block_color = ANSI_YELLOW
+
+            def _colorize(line: str) -> str:
+                return f"{block_color}{line}{ANSI_RESET}"
+
+            stanza_lines: list[str] = []
+            stanza_lines.append(
+                f"  Step {step:02d} | prev_summary={prev_len:04d} chars \"{prev_preview}\""
+            )
+            stanza_lines.append(
+                f"           | chapter={chapter_len:04d} chars \"{chapter_preview}\""
+            )
+            stanza_lines.append(
+                f"           | source={source_len:04d} chars \"{source_preview}\""
+            )
+
             if use_teacher:
                 reference_text = state.chapter_text
                 action = _create_text_action(reference_text, self.agent.tokenizer)
-                lines_to_print.append("           | action_source=teacher")
+                stanza_lines.append("           | action_source=teacher")
             elif use_reference:
                 reference_text = self._reference_actions[state.step_index]
                 action = _create_text_action(reference_text, self.agent.tokenizer)
                 source_reason = "warmup-round" if warmup_round_active else "warmup-step"
-                lines_to_print.append(
+                stanza_lines.append(
                     f"           | action_source=reference-template ({source_reason})"
                 )
             else:
                 action = self.agent.act(state)
-                lines_to_print.append("           | action_source=policy")
+                stanza_lines.append("           | action_source=policy")
             transition = self.environment.step(action)
             self.agent.record(transition)
             metrics = self.environment.last_metrics
 
             canonical_summary_text = metrics.get("canonical_summary_text", action.text)
-            summary_len, summary_preview = _format_text_debug(canonical_summary_text, 20, 20)
-            raw_summary_len, raw_summary_preview = _format_text_debug(action.text, 20, 20)
+            if character_mode:
+                summary_text_for_preview = canonical_summary_text
+                raw_text_for_preview = action.text
+            else:
+                summary_text_for_preview = canonical_summary_text.replace("\n", "\\n")
+                raw_text_for_preview = action.text.replace("\n", "\\n")
+            summary_len, summary_preview = _format_text_debug(summary_text_for_preview, 20, 20)
+            raw_summary_len, raw_summary_preview = _format_text_debug(raw_text_for_preview, 20, 20)
             if raw_summary_preview != summary_preview:
-                lines_to_print.append(
+                stanza_lines.append(
                     f"           | raw_action={raw_summary_len:04d} chars \"{raw_summary_preview}\""
                 )
             total_reward += transition.reward
@@ -2798,13 +2848,16 @@ class DemoTrainer(Trainer):
                 f"soft={metrics.get('reward_soft_bonus', 0.0):+.6f}; {reward_quality})"
             )
 
-            lines_to_print.append(summary_line)
-            lines_to_print.extend(metric_lines)
-            lines_to_print.append(penalty_line)
-            lines_to_print.append(reward_line)
-            _append_step_log(lines_to_print, block_color)
-            for stored_line in lines_to_print:
-                _console_log(stored_line, color=block_color)
+            stanza_lines.append(summary_line)
+            stanza_lines.extend(metric_lines)
+            stanza_lines.append(penalty_line)
+            _append_step_log(stanza_lines + [reward_line], block_color)
+            if character_mode:
+                _console_log(reward_line, color=block_color)
+            else:
+                for stored_line in stanza_lines:
+                    _console_log(stored_line, color=block_color)
+                _console_log(reward_line, color=block_color)
 
             if log_metrics:
                 self.log(log_metrics, global_step)
@@ -3174,22 +3227,13 @@ def build_demo_components(
         segments_by_chapter: list[list[str]] = []
         char_pairs_by_chapter: list[list[str]] = []
         for chapter_text in chapters:
-            chars = list(chapter_text)
+            chars = [char for char in chapter_text if not char.isspace()]
             pairs: list[str] = []
             targets: list[str] = []
             if len(chars) >= 3:
-                for i in range(len(chars) - 2):
-                    pairs.append(chars[i] + chars[i + 1])
-                    targets.append(chars[i + 2])
-            elif len(chars) == 2:
-                pairs.append(chars[0] + chars[1])
-                targets.append(chars[1])
-            elif len(chars) == 1:
-                pairs.append(" " + chars[0])
-                targets.append(chars[0])
-            else:
-                pairs.append("  ")
-                targets.append(" ")
+                for i in range(2, len(chars)):
+                    pairs.append(chars[i - 2] + chars[i - 1])
+                    targets.append(chars[i])
             char_pairs_by_chapter.append(pairs)
             segments_by_chapter.append(targets)
         environment_segments = [
@@ -3198,8 +3242,11 @@ def build_demo_components(
             for char in group
         ]
         if not environment_segments:
-            environment_segments = [" "]
-        observations_for_seed = []
+            environment_segments = []
+        observations_for_seed = [
+            TextObservation("", char, idx + 1)
+            for idx, char in enumerate(environment_segments)
+        ]
         per_round_intervals = segments_by_chapter
         char_pairs_per_round = char_pairs_by_chapter
     else:
