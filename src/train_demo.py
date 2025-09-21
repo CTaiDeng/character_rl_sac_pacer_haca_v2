@@ -227,6 +227,7 @@ CAPITAL_COVERAGE_WEIGHT = 1.5
 CAPITAL_DIVERSITY_WEIGHT = 0.8
 CAPITAL_REDUNDANCY_WEIGHT = 0.6
 CAPITAL_VERIFICATION_BONUS = 0.4
+CAPITAL_FACT_WEIGHT = 0.45
 
 ANSI_GREEN = "[32m"
 ANSI_RED = "[31m"
@@ -708,6 +709,44 @@ class OperationParser:
         return payload.strip(), payload.strip()
 
 
+def _canonicalize_action_text(action_text: str) -> tuple[str, list[Operation]]:
+    """Return a canonical summary text derived from structured operations."""
+
+    operations = OperationParser.parse(action_text)
+    if not operations:
+        return action_text, operations
+
+    def _clean_payload(payload: str) -> str:
+        text = payload.strip()
+        text = re.sub(r"^CH\d{2}\s+", "", text)
+        return text.strip()
+
+    fragments: list[str] = []
+    seen_fragments: set[str] = set()
+    for operation in operations:
+        payload = operation.payload
+        if isinstance(payload, tuple):
+            for part in payload:
+                cleaned = _clean_payload(str(part))
+                if cleaned and cleaned not in seen_fragments:
+                    seen_fragments.add(cleaned)
+                    fragments.append(cleaned)
+        elif isinstance(payload, str):
+            cleaned = _clean_payload(payload)
+            if cleaned and cleaned not in seen_fragments:
+                seen_fragments.add(cleaned)
+                fragments.append(cleaned)
+        elif payload is not None:
+            cleaned = _clean_payload(str(payload))
+            if cleaned and cleaned not in seen_fragments:
+                seen_fragments.add(cleaned)
+                fragments.append(cleaned)
+    canonical = "。".join(fragments).strip()
+    if not canonical:
+        canonical = action_text
+    return canonical, operations
+
+
 class CognitiveCapital:
     """Stateful representation of extracted knowledge."""
 
@@ -808,7 +847,11 @@ class CapitalValuator:
             self.category_universe.add("general")
 
     def _tokenize(self, text: str) -> set[str]:
-        return {token.lower() for token in re.findall(r"[A-Za-z0-9]+", text) if len(token) > 1}
+        tokens: set[str] = {
+            token.lower() for token in re.findall(r"[A-Za-z0-9]+", text) if len(token) > 1
+        }
+        tokens.update(re.findall(r"[\u4e00-\u9fff]{2,}", text))
+        return tokens
 
     def _fact_tokens(self, fact: str) -> set[str]:
         return self._tokenize(fact)
@@ -859,6 +902,7 @@ class CapitalValuator:
                 + CAPITAL_DIVERSITY_WEIGHT * metrics["diversity"]
                 - CAPITAL_REDUNDANCY_WEIGHT * metrics["redundancy"]
                 + CAPITAL_VERIFICATION_BONUS * metrics["verification"]
+                + CAPITAL_FACT_WEIGHT * math.log1p(metrics["fact_count"])
         )
         hedge_discount = 1.0 - 0.2 * metrics["hedge"]
         return max(raw_value * hedge_discount, 0.0)
@@ -1708,8 +1752,9 @@ class ArticleEnvironment:
         source_text = _combine_summary_and_chapter(
             state.previous_summary, state.chapter_text
         )
+        canonical_summary, operations = _canonicalize_action_text(action.text)
         metrics = analyze_summary(
-            action.text,
+            canonical_summary,
             source_text,
             tokenizer=self._tokenizer,
             word_checker=self._word_checker,
@@ -1720,7 +1765,6 @@ class ArticleEnvironment:
         )
         capital_before = self._capital.clone()
         potential_before = self._valuator.potential(capital_before)
-        operations = OperationParser.parse(action.text)
         step_cost = 0.0
         applied_operations = 0
         for operation in operations:
@@ -1738,12 +1782,15 @@ class ArticleEnvironment:
         capital_value = self._valuator.value(self._capital)
         potential_after = self._valuator.potential(self._capital)
         potential_gain = potential_after - potential_before
+        done = self._cursor + 1 >= len(self._chapters)
+        cost_penalty = self._cost_weight * step_cost
+        if done:
+            cost_penalty = self._cost_weight * self._cumulative_cost
         base_reward = (
             capital_value
-            - self._cost_weight * self._cumulative_cost
+            - cost_penalty
             - BUDGET_PENALTY_WEIGHT * budget_breach
         )
-        done = self._cursor + 1 >= len(self._chapters)
 
         similarity_score = metrics.get("similarity", 0.0)
         coverage_score = metrics.get("coverage_ratio", 0.0)
@@ -1795,6 +1842,8 @@ class ArticleEnvironment:
             "reward_potential_gain": float(potential_gain),
             "reward_soft_bonus": float(soft_reward),
             "reward": reward,
+            "canonical_summary_text": canonical_summary,
+            "summary_raw_length": float(len(action.text)),
         })
         metrics["capital_coverage"] = capital_metrics["coverage"]
         metrics["capital_diversity"] = capital_metrics["diversity"]
@@ -2408,15 +2457,22 @@ class DemoTrainer(Trainer):
             self.agent.record(transition)
             metrics = self.environment.last_metrics
 
-            summary_len, summary_preview = _format_text_debug(action.text, 20, 20)
+            canonical_summary_text = metrics.get("canonical_summary_text", action.text)
+            summary_len, summary_preview = _format_text_debug(canonical_summary_text, 20, 20)
+            raw_summary_len, raw_summary_preview = _format_text_debug(action.text, 20, 20)
+            if raw_summary_preview != summary_preview:
+                lines_to_print.append(
+                    f"           | raw_action={raw_summary_len:04d} chars \"{raw_summary_preview}\""
+                )
             total_reward += transition.reward
+            summary_length_value = float(metrics.get("summary_length", summary_len))
             log_metrics: MutableMapping[str, Any] = {
                 "reward": transition.reward,
                 "reward_base": metrics.get("reward_base", 0.0),
                 "reward_potential_gain": metrics.get("reward_potential_gain", 0.0),
                 "reward_soft_bonus": metrics.get("reward_soft_bonus", 0.0),
                 "buffer_size": len(self.agent.replay_buffer),
-                "summary_length": summary_len,
+                "summary_length": summary_length_value,
                 "source_length": metrics.get("source_length", float(source_len)),
                 "length_ratio": metrics.get("length_ratio", 0.0),
                 "similarity": metrics.get("similarity", 0.0),
@@ -2513,7 +2569,7 @@ class DemoTrainer(Trainer):
                 "previous_summary_length": prev_len,
                 "chapter_length": chapter_len,
                 "source_length": source_len,
-                "summary_length": summary_len,
+                "summary_length": int(summary_length_value),
                 "length_ratio": log_metrics.get("length_ratio", 0.0),
                 "similarity": log_metrics.get("similarity", 0.0),
                 "coverage_ratio": log_metrics.get("coverage_ratio", 0.0),
@@ -2811,10 +2867,28 @@ def build_demo_components(
     else:
         observations = list(precomputed)
     chapters = [ob.chapter_text for ob in observations]
+    training_config = _load_training_config()
+    reference_actions_path = Path(
+        training_config["reference_actions_path"]
+    )
+    if not reference_actions_path.is_absolute():
+        reference_actions_path = REPO_ROOT / reference_actions_path
+    reference_actions = _load_reference_actions(reference_actions_path)
+    tokenizer_corpus = list(chapters)
+    tokenizer_corpus.extend(reference_actions.values())
+    tokenizer_corpus.append(CognitiveCapital().render_text(DEFAULT_INITIAL_BUDGET))
     common_charset = _compute_common_summary_charset(article_path)
+    reference_charset = {
+        char
+        for text in reference_actions.values()
+        for char in text
+        if _is_cjk(char)
+    }
+    combined_charset = set(common_charset or [])
+    combined_charset.update(reference_charset)
     tokenizer = CharTokenizer(
-        chapters,
-        summary_charset=common_charset or None,
+        tokenizer_corpus,
+        summary_charset=combined_charset or None,
         punctuation_whitelist=COMMON_SUMMARY_PUNCTUATION,
     )
     if lexical_stats is None or lexical_tokenizer is None:
@@ -2871,13 +2945,6 @@ def build_demo_components(
         device='cpu',
     )
     steps_per_round = len(chapters)
-    training_config = _load_training_config()
-    reference_actions_path = Path(
-        training_config["reference_actions_path"]
-    )
-    if not reference_actions_path.is_absolute():
-        reference_actions_path = REPO_ROOT / reference_actions_path
-    reference_actions = _load_reference_actions(reference_actions_path)
     trainer_config = TrainerConfig(
         total_steps=steps_per_round,
         warmup_steps=0,
