@@ -206,6 +206,13 @@ def _load_training_config() -> tuple[dict[str, Any], Path]:
             0,
         ),
     )
+    char_length_width = max(
+        1,
+        _as_int(
+            raw_config.get("character_length_field_width"),
+            1,
+        ),
+    )
     config = {
         "reference_actions_path": reference_path,
         "reference_warmup_rounds": warmup_rounds,
@@ -215,6 +222,7 @@ def _load_training_config() -> tuple[dict[str, Any], Path]:
         "paragraph_split_min_length": max(0, paragraph_min_length),
         "paragraph_merge_strategy": merge_strategy,
         "character_teacher_interval": character_teacher_interval,
+        "character_length_field_width": char_length_width,
     }
     return config, config_path
 
@@ -294,6 +302,7 @@ COMPLIANCE_INVALID_LOGIT_PENALTY = 12.0
 COMPLIANCE_MASK_FILL_VALUE = -1e9
 ALPHA_MIN = 1e-4
 ALPHA_MAX = 2.0
+CHARACTER_LEXICAL_BIGRAM_BONUS = 1.0
 OPERATION_COSTS: Mapping[str, float] = {
     'ACQUIRE': 3.0,
     'EXTRACT': 3.0,
@@ -1181,9 +1190,9 @@ def _format_reward_component(value: float) -> str:
 
     if math.isnan(value):
         return "缺失"
-    if value >= 0.999:
+    if value >= 0.8:
         return "满分"
-    if value <= -0.999:
+    if value <= -0.8:
         return "负满分"
     if abs(value) < 1e-6:
         return "0.000000"
@@ -1875,6 +1884,7 @@ class ArticleEnvironment:
         self._char_truth_pairs: list[str] = []
         self._char_targets: list[str] = list(self._chapters) if self._iteration_mode == "character" else []
         self._force_truth_next = False
+        self._lexical_bigram_pairs: set[str] = set()
 
     def configure(
             self,
@@ -1904,13 +1914,26 @@ class ArticleEnvironment:
                 )
             elif len(self._char_truth_pairs) > len(self._char_targets):
                 self._char_truth_pairs = self._char_truth_pairs[: len(self._char_targets)]
+            self._lexical_bigram_pairs = self._build_lexical_bigram_pairs()
         else:
             self._char_truth_pairs = []
             self._char_targets = []
             self._force_truth_next = False
+            self._lexical_bigram_pairs = set()
         self._word_checker = WordComplianceChecker(self._chapters)
         self._valuator = CapitalValuator(self._chapters)
         self.reset()
+
+    def _build_lexical_bigram_pairs(self) -> set[str]:
+        pairs: set[str] = set()
+        if self._lexical_statistics is None:
+            return pairs
+        frequency = getattr(self._lexical_statistics, "corpus_frequency", {})
+        for token in frequency:
+            token_str = str(token)
+            if len(token_str) == 2 and not any(ch.isspace() for ch in token_str):
+                pairs.add(token_str)
+        return pairs
 
     def reset(self) -> TextObservation:
         self._cursor = 0
@@ -1956,10 +1979,10 @@ class ArticleEnvironment:
             step_index=self._cursor + 1,
         )
         if self._iteration_mode == "character":
-            target_pair = self._char_targets[self._cursor] if self._cursor < len(self._char_targets) else ""
-            source_text = state.previous_summary + target_pair
+            target_char = self._char_targets[self._cursor] if self._cursor < len(self._char_targets) else ""
+            source_text = state.previous_summary + target_char
         else:
-            target_pair = current_chapter
+            target_char = current_chapter
             source_text = _combine_summary_and_chapter(
                 state.previous_summary, current_chapter
             )
@@ -1973,7 +1996,7 @@ class ArticleEnvironment:
             source_text,
             tokenizer=self._tokenizer,
             word_checker=self._word_checker,
-            chapter_text=target_pair if self._iteration_mode == "character" else current_chapter,
+            chapter_text=target_char if self._iteration_mode == "character" else current_chapter,
             chapter_index=state.step_index,
             lexical_stats=self._lexical_statistics,
             lexical_tokenizer=self._lexical_tokenizer,
@@ -2031,18 +2054,37 @@ class ArticleEnvironment:
         )
         soft_reward = quality_component + lexical_component - cleanliness_penalty
 
+        lexical_bigram_bonus = 0.0
+        applied_lexical_bonus = 0.0
+        if self._iteration_mode == "character":
+            bigram_candidate = source_text if len(source_text) == 2 else ""
+            if bigram_candidate and bigram_candidate in self._lexical_bigram_pairs:
+                lexical_bigram_bonus = CHARACTER_LEXICAL_BIGRAM_BONUS
+
         reward = base_reward + potential_gain + soft_reward
+        base_component = base_reward
+        potential_component = potential_gain
+        soft_component = soft_reward
+        if self._iteration_mode == "character":
+            match_char = bool(target_char and canonical_summary == target_char)
+            base_component = 1.0 if match_char else 0.0
+            potential_component = 1.0 if match_char else 0.0
+            applied_lexical_bonus = lexical_bigram_bonus if match_char else 0.0
+            soft_component = (soft_reward + applied_lexical_bonus) if match_char else 0.0
+            reward = soft_component
         if self._iteration_mode == "character":
             predicted_char = canonical_summary[:1] if canonical_summary else ""
-            self._char_history = (self._char_history + predicted_char)[-2:]
-            next_pair = self._char_history
+            fallback_history = (self._char_history[-1:] + predicted_char)[-2:]
+            next_pair = fallback_history
+            if self._char_truth_pairs and self._cursor + 1 < len(self._char_truth_pairs):
+                next_pair = self._char_truth_pairs[self._cursor + 1]
             if (
                     self._force_truth_next
                     and self._char_truth_pairs
                     and self._cursor < len(self._char_truth_pairs) - 1
             ):
                 next_pair = self._char_truth_pairs[self._cursor + 1]
-                self._char_history = next_pair
+            self._char_history = next_pair
             self._current_summary = next_pair
             self._force_truth_next = False
         else:
@@ -2070,9 +2112,10 @@ class ArticleEnvironment:
             "budget_remaining": float(self._budget),
             "cumulative_cost": float(self._cumulative_cost),
             "budget_breach": float(budget_breach),
-            "reward_base": float(base_reward),
-            "reward_potential_gain": float(potential_gain),
-            "reward_soft_bonus": float(soft_reward),
+            "reward_base": float(base_component),
+            "reward_potential_gain": float(potential_component),
+            "reward_soft_bonus": float(soft_component),
+            "lexical_bigram_bonus": float(applied_lexical_bonus if self._iteration_mode == "character" else lexical_bigram_bonus),
             "reward": reward,
             "canonical_summary_text": canonical_summary,
             "summary_raw_length": float(len(action.text)),
@@ -2802,6 +2845,7 @@ class DemoTrainer(Trainer):
             per_round_intervals: Sequence[Sequence[str]] | None = None,
             char_pairs_per_round: Sequence[Sequence[str]] | None = None,
             character_teacher_interval: int = 0,
+            character_length_field_width: int = 4,
     ) -> None:
         super().__init__(agent, environment, config, logger)
         self._intervals = list(intervals)
@@ -2821,6 +2865,15 @@ class DemoTrainer(Trainer):
             else None
         )
         self._character_teacher_interval = max(0, character_teacher_interval)
+        self._char_length_field_width = max(1, character_length_field_width)
+
+    def _format_length(self, length: int, character_mode: bool) -> str:
+        if character_mode:
+            width = max(1, self._char_length_field_width)
+            if width <= 1:
+                return str(length)
+            return str(length).zfill(width)
+        return f"{length:04d}"
 
     def run(self, *, round_index: int = 1) -> None:
         iteration_mode = getattr(self.environment, "_iteration_mode", "chapter")
@@ -2884,14 +2937,27 @@ class DemoTrainer(Trainer):
             )
             teacher_interval = self._character_teacher_interval if character_mode else 0
             use_teacher = character_mode and teacher_interval > 0 and (step % teacher_interval == 0)
-            target_text = ""
+            target_pair = ""
+            target_char = ""
+            next_char = ""
             if character_mode:
                 if round_pairs and step - 1 < len(round_pairs):
-                    target_text = round_pairs[step - 1]
+                    target_pair = round_pairs[step - 1]
                 elif self._char_pairs_per_round:
                     candidates = self._char_pairs_per_round[(round_index - 1) % len(self._char_pairs_per_round)]
                     if step - 1 < len(candidates):
-                        target_text = candidates[step - 1]
+                        target_pair = candidates[step - 1]
+                if target_pair:
+                    target_char = target_pair[-1]
+                else:
+                    char_targets = getattr(self.environment, "_char_targets", [])
+                    cursor_index = getattr(self.environment, "_cursor", 0)
+                    if 0 <= cursor_index < len(char_targets):
+                        target_char = char_targets[cursor_index]
+                char_targets_all = getattr(self.environment, "_char_targets", [])
+                cursor_index = getattr(self.environment, "_cursor", 0)
+                if 0 <= cursor_index + 1 < len(char_targets_all):
+                    next_char = char_targets_all[cursor_index + 1]
 
             if character_mode:
                 truth_pair = (
@@ -2904,15 +2970,16 @@ class DemoTrainer(Trainer):
                         self.environment.override_current_summary(truth_pair)
                     if hasattr(self.environment, "set_force_truth_pair"):
                         self.environment.set_force_truth_pair(True)
-                    state = TextObservation(truth_pair, state.chapter_text, state.step_index)
+                    state = TextObservation(truth_pair[:1], state.chapter_text, state.step_index)
                 else:
                     if hasattr(self.environment, "set_force_truth_pair"):
                         self.environment.set_force_truth_pair(False)
 
             if character_mode:
                 sanitized_prev = state.previous_summary
-                sanitized_chapter = target_text
-                source_text = state.previous_summary + target_text
+                target_display_char = target_char or (target_pair[-1:] if target_pair else "")
+                sanitized_chapter = target_display_char
+                source_text = state.previous_summary + target_display_char
                 source_preview_text = source_text
             else:
                 sanitized_prev = state.previous_summary.replace("\n", "\\n")
@@ -2929,19 +2996,23 @@ class DemoTrainer(Trainer):
             def _colorize(line: str) -> str:
                 return f"{block_color}{line}{ANSI_RESET}"
 
+            prev_len_str = self._format_length(prev_len, character_mode)
+            chapter_len_str = self._format_length(chapter_len, character_mode)
+            source_len_str = self._format_length(source_len, character_mode)
+
             stanza_lines: list[str] = []
             stanza_lines.append(
-                f"  Step {step:02d} | prev_summary={prev_len:04d} chars \"{prev_preview}\""
+                f"  Step {step:02d} | prev_summary={prev_len_str} chars \"{prev_preview}\""
             )
             stanza_lines.append(
-                f"           | chapter={chapter_len:04d} chars \"{chapter_preview}\""
+                f"           | chapter={chapter_len_str} chars \"{chapter_preview}\""
             )
             stanza_lines.append(
-                f"           | source={source_len:04d} chars \"{source_preview}\""
+                f"           | source={source_len_str} chars \"{source_preview}\""
             )
 
             if use_teacher:
-                reference_text = target_text if character_mode else state.chapter_text
+                reference_text = target_char if character_mode else state.chapter_text
                 action = _create_text_action(reference_text, self.agent.tokenizer)
                 stanza_lines.append("           | action_source=teacher")
             elif use_reference:
@@ -2960,15 +3031,20 @@ class DemoTrainer(Trainer):
 
             canonical_summary_text = metrics.get("canonical_summary_text", action.text)
             if character_mode:
-                summary_text_for_preview = sanitized_chapter or canonical_summary_text
-                raw_text_for_preview = action.text
+                summary_text_for_preview = sanitized_chapter or canonical_summary_text[:1]
+                if use_teacher:
+                    display_action_text = next_char or action.text[:1]
+                else:
+                    display_action_text = action.text[:1] if action.text else ""
+                raw_text_for_preview = display_action_text
             else:
                 summary_text_for_preview = canonical_summary_text.replace("\n", "\\n")
                 raw_text_for_preview = action.text.replace("\n", "\\n")
             summary_len, summary_preview = _format_text_debug(summary_text_for_preview, 20, 20)
             raw_summary_len, raw_summary_preview = _format_text_debug(raw_text_for_preview, 20, 20)
+            raw_summary_len_str = self._format_length(raw_summary_len, character_mode)
             stanza_lines.append(
-                f"           | raw_action={raw_summary_len:04d} chars \"{raw_summary_preview}\""
+                f"           | raw_action={raw_summary_len_str} chars \"{raw_summary_preview}\""
             )
             total_reward += transition.reward
             summary_length_value = float(metrics.get("summary_length", summary_len))
@@ -3006,8 +3082,9 @@ class DemoTrainer(Trainer):
                 "budget_breach": metrics.get("budget_breach", 0.0),
                 "cumulative_cost": metrics.get("cumulative_cost", 0.0),
             }
+            summary_len_str = self._format_length(summary_len, character_mode)
             summary_line = (
-                f"           -> summary={summary_len:04d} chars \"{summary_preview}\""
+                f"           -> summary={summary_len_str} chars \"{summary_preview}\""
             )
 
             metric_indent = "           "
@@ -3015,6 +3092,7 @@ class DemoTrainer(Trainer):
                 ("reward_base", "reward_base", "基础奖励，结合资本价值与预算成本"),
                 ("reward_potential", "reward_potential_gain", "潜在价值增量"),
                 ("reward_soft", "reward_soft_bonus", "摘要质量软奖励"),
+                ("reward_lexical", "lexical_bigram_bonus", "字符二元组奖励，匹配词表中的二元组合时触发"),
                 ("len_ratio", "length_ratio", "摘要长度与信息源比值，偏低会导致覆盖不足"),
                 ("sim", "similarity", "字符级相似度，衡量摘要整体贴近原文的程度"),
                 ("coverage", "coverage_ratio", "覆盖率，统计摘要覆盖原文字符的比例"),
@@ -3061,8 +3139,8 @@ class DemoTrainer(Trainer):
             base_display = _format_reward_component(metrics.get("reward_base", 0.0))
             potential_display = _format_reward_component(metrics.get("reward_potential_gain", 0.0))
             soft_display = _format_reward_component(metrics.get("reward_soft_bonus", 0.0))
-            if character_mode and target_text:
-                stripped_target = target_text.replace("\\n", "")
+            if character_mode and target_char:
+                stripped_target = target_char.replace("\\n", "")
                 if raw_text_for_preview == stripped_target:
                     base_display = "满分"
                     potential_display = "满分"
@@ -3455,9 +3533,9 @@ def build_demo_components(
             chars = [char for char in chapter_text if not char.isspace()]
             pairs: list[str] = []
             targets: list[str] = []
-            if len(chars) >= 3:
-                for i in range(2, len(chars)):
-                    pairs.append(chars[i - 2] + chars[i - 1])
+            if len(chars) >= 2:
+                for i in range(1, len(chars)):
+                    pairs.append(chars[i - 1] + chars[i])
                     targets.append(chars[i])
             char_pairs_by_chapter.append(pairs)
             segments_by_chapter.append(targets)
@@ -3571,6 +3649,7 @@ def build_demo_components(
         per_round_intervals=per_round_intervals,
         char_pairs_per_round=char_pairs_per_round,
         character_teacher_interval=training_config["character_teacher_interval"],
+        character_length_field_width=training_config.get("character_length_field_width", 1),
     )
     return agent, trainer
 

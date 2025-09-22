@@ -103,14 +103,24 @@ $$
 \mathrm{nce}_t=\log\frac{\exp(\langle f(S_t),\bar f(x^+)\rangle/\tau)}{\exp(\langle f(S_t),\bar f(x^+)\rangle/\tau)+\sum_{x^-\in\mathcal{N}_t}\exp(\langle f(S_t),\bar f(x^-)\rangle/\tau)}
 $$
 
-**(3) 洁净/非法罚**
+**(3) 字符二元奖励（拓扑记忆）**
+
+对字符模式，构造上一字符与目标字符形成的二元组 $b_t = s_{t-1}^{(1)} c_t$。若 $b_t$ 出现在 `sample_article_lexical.json` 的 `corpus_frequency` 词表中，则给予额外奖励
+
+\[
+\mathrm{bonus}_t = \lambda_{\text{bigram}} \cdot \mathbf{1}[b_t \in \mathcal{L}], \qquad \lambda_{\text{bigram}} = 1.0,
+\]
+
+其中 $\mathcal{L}$ 为词频库中的二元集合。该奖励直接累加到字符模式的 `soft` 组件，促使策略优先记忆原文的非交换邻接字符组合。
+
+**(4) 洁净/非法罚**
 
 $$
 \mathrm{ill}_t=\mathbf{1}[a_t\notin\mathcal{A}(s_t)],\quad 
 \mathrm{garble}_t=\mathsf{Garble}(a_t)
 $$
 
-**(4) 奖励尺度化（PopArt/EMA 标准化）**
+**(5) 奖励尺度化（PopArt/EMA 标准化）**
 对 $\mathrm{cov}_t,\ \mathrm{nce}_t$ 应用
 
 $$
@@ -120,7 +130,7 @@ $$
 
 $\beta\in[10^{-4},10^{-2}]$，$\epsilon=10^{-8}$。
 
-**(5) 步级奖励（无恒零项）**
+**(6) 步级奖励（无恒零项）**
 
 $$
 r_t=\lambda_{\mathrm{cov}}\cdot \mathcal{N}(\mathrm{cov}_t)+
@@ -399,11 +409,14 @@ $\arg\max_\pi \mathbb{E}\sum_t \gamma^t r'_t=\arg\max_\pi \mathbb{E}\sum_t \gamm
 
 ### 15. 实现映射（仓库现状概览）
 
-* **无泄漏观测**：`ArticleEnvironment.reset/step` 在字符模式下返回 `TextObservation(pair[0], "")`，仅暴露上一字符；二元组 `pair` 与目标字符 `self._char_targets` 仅在奖励与日志阶段使用。
+* **无泄漏观测**：`ArticleEnvironment.reset/step` 在字符模式下返回 `TextObservation(pair[0], "")`，仅暴露上一字符；二元组 `pair=(c_{t-1}, c_t)` 与目标字符 `c_t` 仅在奖励与日志阶段使用。
+* **原地迭代**：日志中的 `prev_summary=c_{t-1}`、`chapter=c_t`，`raw_action=c_{t+1}`（若存在）；`source=c_{t-1}c_t`，符合“非交换临近字符”拓扑。
 * **硬掩码数稳**：`TextPolicyNetwork._mask_logits` 将非法 logits 置为 `-1e9`，`first_step_distribution` 提供合法掩码、概率与对数概率输出，直接支撑 Top‑p 期望与熵估计。
 * **Top‑p 期望**：`DemoSACAgent.update` 的 `_select_top_p`/`_evaluate_q_candidates` 组合在目标和策略两侧均采用截断重归一的概率，保持 $(1-done)$ 截断和 Twin-Q 最小化。
 * **温度自适应**：维护 `log_alpha`（Adam 优化，学习率可配置），执行 $\log\alpha \leftarrow \log\alpha + \eta(H_{\text{tgt}}-H)$ 并限制 $\alpha\in[10^{-4},2]$；更新返回实时 `alpha` 供监控。
 * **奖励拆分展示**：日志中 `base/potential/soft` 通过 `_format_reward_component` 自动映射为“满分/负满分/数值”；在字符模式且代理输出与目标对齐时，三项同时显示“满分”。
+* **字符二元奖励**：`ArticleEnvironment.step` 在字符模式检测二元组是否存在于 `sample_article_lexical.json`，命中时追加 `CHARACTER_LEXICAL_BIGRAM_BONUS=1.0`，并在日志中记录 `lexical_bigram_bonus`。
+* **日志宽度参数**：`character_length_field_width` 控制字符模式日志的长度字段，默认 1，可通过配置调整补零宽度。
 * **Trainer 日志同步**：字符模式下 `DemoTrainer.run` 使用轮次教师对进行日志与教师干预，保证代理观测与回放的一致性。
 
 > **示例**（原文片段 “这五个字像一道闪电…” 中“意味着什么” 的字符展开）：

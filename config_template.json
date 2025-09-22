@@ -6,5 +6,6 @@
   "iteration_granularity_options": ["chapter", "paragraph", "character"],
   "paragraph_split_min_length": 60,
   "paragraph_merge_strategy": "preserve",
-  "character_teacher_interval": 0
+  "character_teacher_interval": 0,
+  "character_length_field_width": 1
 }

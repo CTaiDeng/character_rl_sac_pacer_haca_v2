@@ -39,6 +39,8 @@ function SAMPLE_POLICY(tokens, lengths):
 - 优化器：策略与 Q 网络均使用 Adam(LR=3e-4)，熵系数 `alpha` 来自 `AgentConfig` 初始设置并在更新过程中自适应。
 - 更新节奏：每步收集 1 条样本，`DemoSACAgent.update` 在 `updates_per_round = steps_per_round` 条目上执行，软更新系数 `tau=TrainerConfig.tau`。
 - 参数规模：`DemoSACAgent.parameter_count` 统计策略网络参数量并写入导出，便于推断模型大小 `MODEL_SIZE_BYTES`。
+- 字符模式长度字段：`character_length_field_width` 控制日志中 `prev_summary=... chars` 的宽度（默认 1，无补零）。
+- 字符二元奖励：若上一字符与目标字符组合出现在词频库 `corpus_frequency` 中，则额外加分（`CHARACTER_LEXICAL_BIGRAM_BONUS=1.0`）。
 - Top-p 采样：默认 `top_p=0.98`，使用 `first_step_distribution` 的概率并在选集上重新归一化后计算无偏期望。
 - 温度自适应：维护 `log_alpha` 参数，按 `logα ← logα + η(H_target - H)`（梯度化实现）更新并限制在 `[10^{-4}, 2]`。
 ## 数据流摘要
