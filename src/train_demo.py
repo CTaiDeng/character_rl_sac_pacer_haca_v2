@@ -1930,7 +1930,8 @@ class ArticleEnvironment:
             else:
                 self._char_history = ""
                 self._current_summary = ""
-            return TextObservation(self._current_summary, "", 1)
+            initial_prev = self._current_summary[:1] if self._current_summary else ""
+            return TextObservation(initial_prev, "", 1)
         self._current_summary = self._capital.render_text(self._budget)
         return TextObservation(self._current_summary, self._chapters[0], 1)
 
@@ -1945,8 +1946,12 @@ class ArticleEnvironment:
 
     def step(self, action: TextAction) -> Transition:
         current_chapter = self._chapters[self._cursor]
+        if self._iteration_mode == "character":
+            prev_summary_text = self._current_summary[:1] if self._current_summary else ""
+        else:
+            prev_summary_text = self._current_summary
         state = TextObservation(
-            previous_summary=self._current_summary,
+            previous_summary=prev_summary_text,
             chapter_text="" if self._iteration_mode == "character" else current_chapter,
             step_index=self._cursor + 1,
         )
@@ -2045,14 +2050,16 @@ class ArticleEnvironment:
             self._current_summary = next_summary
         self._cursor += 1
         if not done:
+            next_prev = self._current_summary[:1] if self._iteration_mode == "character" else self._current_summary
             next_state = TextObservation(
-                previous_summary=self._current_summary,
+                previous_summary=next_prev,
                 chapter_text="" if self._iteration_mode == "character" else self._chapters[self._cursor],
                 step_index=self._cursor + 1,
             )
         else:
+            next_prev = self._current_summary[:1] if self._iteration_mode == "character" else self._current_summary
             next_state = TextObservation(
-                previous_summary=self._current_summary,
+                previous_summary=next_prev,
                 chapter_text="",
                 step_index=self._cursor + 1,
             )
@@ -2953,7 +2960,7 @@ class DemoTrainer(Trainer):
 
             canonical_summary_text = metrics.get("canonical_summary_text", action.text)
             if character_mode:
-                summary_text_for_preview = target_text if target_text else canonical_summary_text
+                summary_text_for_preview = canonical_summary_text
                 raw_text_for_preview = action.text
             else:
                 summary_text_for_preview = canonical_summary_text.replace("\n", "\\n")
