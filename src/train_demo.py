@@ -3051,11 +3051,18 @@ class DemoTrainer(Trainer):
                 block_color = ANSI_RED
             else:
                 block_color = ANSI_YELLOW
+            base_display = _format_reward_component(metrics.get("reward_base", 0.0))
+            potential_display = _format_reward_component(metrics.get("reward_potential_gain", 0.0))
+            soft_display = _format_reward_component(metrics.get("reward_soft_bonus", 0.0))
+            if character_mode and target_text:
+                stripped_target = target_text.replace("\\n", "")
+                if raw_text_for_preview == stripped_target:
+                    base_display = "满分"
+                    potential_display = "满分"
+                    soft_display = "满分"
             reward_line = (
                 f"{metric_indent}reward={transition.reward:.6f} "
-                f"(base={_format_reward_component(metrics.get('reward_base', 0.0))}, "
-                f"potential={_format_reward_component(metrics.get('reward_potential_gain', 0.0))}, "
-                f"soft={_format_reward_component(metrics.get('reward_soft_bonus', 0.0))}; {reward_quality})"
+                f"(base={base_display}, potential={potential_display}, soft={soft_display}; {reward_quality})"
             )
 
             base_lines = stanza_lines + [summary_line]
