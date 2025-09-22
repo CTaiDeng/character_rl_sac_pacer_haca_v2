@@ -2960,7 +2960,7 @@ class DemoTrainer(Trainer):
 
             canonical_summary_text = metrics.get("canonical_summary_text", action.text)
             if character_mode:
-                summary_text_for_preview = canonical_summary_text
+                summary_text_for_preview = sanitized_chapter or canonical_summary_text
                 raw_text_for_preview = action.text
             else:
                 summary_text_for_preview = canonical_summary_text.replace("\n", "\\n")
