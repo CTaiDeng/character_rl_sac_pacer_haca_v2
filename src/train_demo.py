@@ -1190,12 +1190,6 @@ def _format_reward_component(value: float) -> str:
 
     if math.isnan(value):
         return "缺失"
-    if value >= 0.8:
-        return "满分"
-    if value <= -0.8:
-        return "负满分"
-    if abs(value) < 1e-6:
-        return "0.000000"
     return f"{value:+.6f}"
 
 
@@ -1927,12 +1921,19 @@ class ArticleEnvironment:
     def _build_lexical_bigram_pairs(self) -> set[str]:
         pairs: set[str] = set()
         if self._lexical_statistics is None:
-            return pairs
-        frequency = getattr(self._lexical_statistics, "corpus_frequency", {})
+            frequency = {}
+        else:
+            frequency = getattr(self._lexical_statistics, "corpus_frequency", {})
         for token in frequency:
             token_str = str(token)
             if len(token_str) == 2 and not any(ch.isspace() for ch in token_str):
                 pairs.add(token_str)
+        for chapter in self._chapters:
+            cleaned = "".join(ch for ch in chapter if not ch.isspace())
+            for idx in range(len(cleaned) - 1):
+                candidate = cleaned[idx:idx + 2]
+                if candidate:
+                    pairs.add(candidate)
         return pairs
 
     def reset(self) -> TextObservation:
@@ -2056,22 +2057,18 @@ class ArticleEnvironment:
 
         lexical_bigram_bonus = 0.0
         applied_lexical_bonus = 0.0
+        soft_component = soft_reward
+        base_component = base_reward
+        potential_component = potential_gain
+        reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
             bigram_candidate = source_text if len(source_text) == 2 else ""
             if bigram_candidate and bigram_candidate in self._lexical_bigram_pairs:
                 lexical_bigram_bonus = CHARACTER_LEXICAL_BIGRAM_BONUS
-
-        reward = base_reward + potential_gain + soft_reward
-        base_component = base_reward
-        potential_component = potential_gain
-        soft_component = soft_reward
-        if self._iteration_mode == "character":
             match_char = bool(target_char and canonical_summary == target_char)
-            base_component = 1.0 if match_char else 0.0
-            potential_component = 1.0 if match_char else 0.0
             applied_lexical_bonus = lexical_bigram_bonus if match_char else 0.0
-            soft_component = (soft_reward + applied_lexical_bonus) if match_char else 0.0
-            reward = soft_component
+            soft_component = soft_reward + applied_lexical_bonus
+            reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
             predicted_char = canonical_summary[:1] if canonical_summary else ""
             fallback_history = (self._char_history[-1:] + predicted_char)[-2:]
@@ -2845,7 +2842,7 @@ class DemoTrainer(Trainer):
             per_round_intervals: Sequence[Sequence[str]] | None = None,
             char_pairs_per_round: Sequence[Sequence[str]] | None = None,
             character_teacher_interval: int = 0,
-            character_length_field_width: int = 4,
+            character_length_field_width: int = 1,
     ) -> None:
         super().__init__(agent, environment, config, logger)
         self._intervals = list(intervals)
@@ -3012,7 +3009,12 @@ class DemoTrainer(Trainer):
             )
 
             if use_teacher:
-                reference_text = target_char if character_mode else state.chapter_text
+                if character_mode:
+                    reference_text = (target_char or "") + (next_char or "")
+                    if not reference_text:
+                        reference_text = ""
+                else:
+                    reference_text = state.chapter_text
                 action = _create_text_action(reference_text, self.agent.tokenizer)
                 stanza_lines.append("           | action_source=teacher")
             elif use_reference:
@@ -3033,7 +3035,7 @@ class DemoTrainer(Trainer):
             if character_mode:
                 summary_text_for_preview = sanitized_chapter or canonical_summary_text[:1]
                 if use_teacher:
-                    display_action_text = next_char or action.text[:1]
+                    display_action_text = next_char or target_char or action.text[:1]
                 else:
                     display_action_text = action.text[:1] if action.text else ""
                 raw_text_for_preview = display_action_text
