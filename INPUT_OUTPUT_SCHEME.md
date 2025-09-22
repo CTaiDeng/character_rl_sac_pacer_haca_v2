@@ -11,8 +11,9 @@
 | 符号 | 描述 | 实现对照 |
 | --- | --- | --- |
 | $\sigma(C_{t-1}, B_{t-1})$ | 观测中的认知资本文本快照 | `CognitiveCapital.render_text` |
-| $\chi_t$ | 当前章节原文 | `ArticleEnvironment._chapters[t]` |
-| $O_t$ | 完整观测 $(\sigma(C_{t-1},B_{t-1}), \chi_t)$ | `TextObservation(previous_summary, chapter_text)` |
+| $\chi_t$ | 当前章节原文（章节模式） | `ArticleEnvironment._chapters[t]` |
+| $\hat\chi_t$ | 字符模式下的隐藏教师对 | `ArticleEnvironment._char_targets[t]` |
+| $O_t$ | 完整观测 $(\sigma(C_{t-1},B_{t-1}), \chi_t)$，字符模式时 $\chi_t=\varnothing$ | `TextObservation(previous_summary, chapter_text)` |
 | $x_t$ | Token 序列 | `CharTokenizer.encode_observation` 返回的整型数组 |
 | $y_t$ | 策略生成的字符文本 | `CharTokenizer.decode_action` |
 | $A_t$ | 解析后的操作列表 | `OperationParser.parse` |
@@ -21,7 +22,7 @@
 | $r_t$ | 奖励 $(B_t, \Delta\Phi_t, S_t)$ | `ArticleEnvironment.step` 组装的 `metrics['reward']` |
 
 ## 编码与解析流程
-- 观测拼接：渲染文本 $\sigma(C_{t-1},B_{t-1})$ 与 $\chi_t$ 之间插入分隔符，得到字符序列 `[<bos>] + summary + [<sep>] + chapter + [<eos>]`。
+- 观测拼接：章节模式下拼接 `[<bos>] + summary + [<sep>] + chapter + [<eos>]`；字符模式仅编码历史 `[<bos>] + summary + [<eos>]`，避免泄漏未来字符。
 - Token 化：`CharTokenizer.encode_observation` 将字符映射到词表索引，词表包含 `<pad>/<bos>/<eos>/<sep>/<unk>` 以及章节字符。
 - 策略解码：`TextPolicyNetwork` 以 $x_t$ 为输入，解码获得 `token_ids` 与文本 $y_t$。
 - 操作解析：`OperationParser.parse` 将 $y_t$ 按行映射为结构化 `Operation(kind, payload)`。
@@ -32,11 +33,18 @@
 ```pseudo
 function STEP(environment_state, policy):
     state_text = render(C_{t-1}, B_{t-1})
-    observation = TextObservation(state_text, chi_t, t)
+    if mode == "character":
+        observation = TextObservation(state_text, "", t)
+        target_pair = hidden_targets[t]
+        source_text = state_text + target_pair
+    else:
+        observation = TextObservation(state_text, chi_t, t)
+        target_pair = chi_t
+        source_text = combine(state_text, chi_t)
     tokens = tokenizer.encode_observation(observation)
     action_ids, info = policy(tokens)
     action_text = tokenizer.decode_action(action_ids)
-    operations = OperationParser.parse(action_text)
+    operations = OperationParser.parse(action_text)           # 字符模式返回空列表
     cost = sum(OPERATION_COSTS.get(op.kind, DEFAULT_OPERATION_COST) for op in operations)
     capital_before = capital.clone()
     potential_before = valuator.value(capital_before)

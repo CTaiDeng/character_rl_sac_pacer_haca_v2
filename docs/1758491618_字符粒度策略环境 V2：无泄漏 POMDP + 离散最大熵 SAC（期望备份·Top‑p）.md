@@ -394,3 +394,13 @@ $\arg\max_\pi \mathbb{E}\sum_t \gamma^t r'_t=\arg\max_\pi \mathbb{E}\sum_t \gamm
 * 拨码：`use_cql`、`policy_use_topp`、`ema_target_on`、`illegal_done_on`。
 
 > **执行口径**：先合并本 V2 规范的**必改项**（温度/终止/数稳/奖励尺度/EMA‑NCE/Top‑p），再做小流量灰度；Gate 不过，自动回滚与快照对比复盘。
+
+---
+
+### 15. 实现映射（仓库现状概览）
+
+* **无泄漏观测**：`ArticleEnvironment.reset/step` 在字符模式下返回 `TextObservation(previous_summary, "")`，真实对齐目标仅在奖励计算阶段通过 `self._char_targets` 使用。
+* **硬掩码数稳**：`TextPolicyNetwork._mask_logits` 将非法 logits 置为 `-1e9`，`first_step_distribution` 提供合法掩码、概率与对数概率输出，直接支撑 Top‑p 期望与熵估计。
+* **Top‑p 期望**：`DemoSACAgent.update` 的 `_select_top_p`/`_evaluate_q_candidates` 组合在目标和策略两侧均采用截断重归一的概率，保持 $(1-done)$ 截断和 Twin-Q 最小化。
+* **温度自适应**：维护 `log_alpha`（Adam 优化，学习率可配置），执行 $\log\alpha \leftarrow \log\alpha + \eta(H_{\text{tgt}}-H)$ 并限制 $\alpha\in[10^{-4},2]$；更新返回实时 `alpha` 供监控。
+* **Trainer 日志同步**：字符模式下 `DemoTrainer.run` 使用轮次教师对进行日志与教师干预，保证代理观测与回放的一致性。

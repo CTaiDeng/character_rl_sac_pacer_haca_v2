@@ -9,7 +9,8 @@
 - 嵌入层：共享词表大小 $|V| \approx 1600$（随语料自动统计），\`embedding\` 权重与价值网络共享初始化种子。
 - 编码器：单层 GRU（隐藏 128），使用 `pack_padded_sequence` 处理变长输入。
 - 解码器：单层 GRU 加线性层输出 logits，生成长度上限 $L_{\max}=512$（由章节长度截断）。
-- 合规温度与惩罚：使用 `DEFAULT_COMPLIANCE_TEMPERATURE=0.85`、`COMPLIANCE_INVALID_LOGIT_PENALTY=12.0` 限制非法字符概率。
+- 合规温度与惩罚：使用 `DEFAULT_COMPLIANCE_TEMPERATURE=0.85`，非法 logits 统一填充 `COMPLIANCE_MASK_FILL_VALUE=-1e9`，保证硬掩码稳定。
+- 首步分布：`first_step_distribution` 直接输出经硬掩码与重标定后的 logits/probs/log-probs/合法掩码，供 Top-p 期望与熵更新使用。
 ## 价值网络 $Q_\phi, Q_\psi$
 价值网络共享 `TextQNetwork` 拓扑，使用相同词表嵌入并计算遮罩平均。
 状态摘要 $u = \tanh(W_s \cdot \mathrm{mean}_{\mathrm{mask}}(E x_t))$，动作摘要 $v = \tanh(W_a \cdot \mathrm{mean}_{\mathrm{mask}}(E y_t))$，连接后经两层 MLP 输出标量。
@@ -38,9 +39,13 @@ function SAMPLE_POLICY(tokens, lengths):
 - 优化器：策略与 Q 网络均使用 Adam(LR=3e-4)，熵系数 `alpha` 来自 `AgentConfig` 初始设置并在更新过程中自适应。
 - 更新节奏：每步收集 1 条样本，`DemoSACAgent.update` 在 `updates_per_round = steps_per_round` 条目上执行，软更新系数 `tau=TrainerConfig.tau`。
 - 参数规模：`DemoSACAgent.parameter_count` 统计策略网络参数量并写入导出，便于推断模型大小 `MODEL_SIZE_BYTES`。
+- Top-p 采样：默认 `top_p=0.98`，使用 `first_step_distribution` 的概率并在选集上重新归一化后计算无偏期望。
+- 温度自适应：维护 `log_alpha` 参数，按 `logα ← logα + η(H_target - H)`（梯度化实现）更新并限制在 `[10^{-4}, 2]`。
 ## 数据流摘要
 - 观测编码：`CharTokenizer.encode_observation` 共享给策略与价值网络。
 - 策略采样：`TextPolicyNetwork` 输出字符动作，经 `OperationParser.parse` 转化为结构化操作并更新 `CognitiveCapital`。
 - 价值评估：双路 `TextQNetwork` 在训练时接收状态与策略采样动作，构造目标 $y = r + \gamma(\min(Q_\phi, Q_\psi) - \alpha \log \pi)$。
 - 参数更新：策略目标使用 $J_\pi = \mathbb{E}[\alpha \log \pi_\theta(a\mid s) - Q_\phi(s,a)]$，Q 目标使用 MSE，软更新由 `tau` 控制。
+- Top-p 期望：目标值与策略梯度均基于 Top-p 截断后的归一化分布，对应候选集合 `detach()` 后再组合 `q` 与 `\log \pi`。
+- 熵目标：使用合法动作计数计算 $H_{\text{tgt}}=\kappa\log |\mathcal{A}(s)|$ 并驱动 `\alpha` 自适应。
 如需调整网络维度、合规模块或目标定义，请同步修改实现与本文档。

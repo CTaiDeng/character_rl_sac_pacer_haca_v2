@@ -17,6 +17,9 @@ class AgentConfig:
     tau: float = 0.005
     alpha: float = 0.2
     target_entropy: Optional[float] = None
+    alpha_lr: float = 1e-4
+    top_p: float = 0.98
+    entropy_kappa: float = 0.9
 
 
 class SACAgent:

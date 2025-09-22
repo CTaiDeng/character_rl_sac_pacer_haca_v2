@@ -291,6 +291,9 @@ LEXICAL_JS_WEIGHT = 0.1
 COMMON_SUMMARY_PUNCTUATION = set(",.!?;:'\"-()[] ")
 DEFAULT_COMPLIANCE_TEMPERATURE = 0.85
 COMPLIANCE_INVALID_LOGIT_PENALTY = 12.0
+COMPLIANCE_MASK_FILL_VALUE = -1e9
+ALPHA_MIN = 1e-4
+ALPHA_MAX = 2.0
 OPERATION_COSTS: Mapping[str, float] = {
     'ACQUIRE': 3.0,
     'EXTRACT': 3.0,
@@ -1913,8 +1916,7 @@ class ArticleEnvironment:
             else:
                 self._char_history = ""
                 self._current_summary = ""
-            first_target = self._chapters[0] if self._chapters else ""
-            return TextObservation(self._current_summary, first_target, 1)
+            return TextObservation(self._current_summary, "", 1)
         self._current_summary = self._capital.render_text(self._budget)
         return TextObservation(self._current_summary, self._chapters[0], 1)
 
@@ -1928,16 +1930,19 @@ class ArticleEnvironment:
             self._char_history = summary[-2:]
 
     def step(self, action: TextAction) -> Transition:
+        current_chapter = self._chapters[self._cursor]
         state = TextObservation(
             previous_summary=self._current_summary,
-            chapter_text=self._chapters[self._cursor],
+            chapter_text="" if self._iteration_mode == "character" else current_chapter,
             step_index=self._cursor + 1,
         )
         if self._iteration_mode == "character":
-            source_text = state.previous_summary + state.chapter_text
+            target_pair = self._char_targets[self._cursor] if self._cursor < len(self._char_targets) else ""
+            source_text = state.previous_summary + target_pair
         else:
+            target_pair = current_chapter
             source_text = _combine_summary_and_chapter(
-                state.previous_summary, state.chapter_text
+                state.previous_summary, current_chapter
             )
         if self._iteration_mode == "character":
             canonical_summary = action.text[:1] if action.text else ""
@@ -1949,7 +1954,7 @@ class ArticleEnvironment:
             source_text,
             tokenizer=self._tokenizer,
             word_checker=self._word_checker,
-            chapter_text=state.chapter_text,
+            chapter_text=target_pair if self._iteration_mode == "character" else current_chapter,
             chapter_index=state.step_index,
             lexical_stats=self._lexical_statistics,
             lexical_tokenizer=self._lexical_tokenizer,
@@ -2028,7 +2033,7 @@ class ArticleEnvironment:
         if not done:
             next_state = TextObservation(
                 previous_summary=self._current_summary,
-                chapter_text=self._chapters[self._cursor],
+                chapter_text="" if self._iteration_mode == "character" else self._chapters[self._cursor],
                 step_index=self._cursor + 1,
             )
         else:
@@ -2129,22 +2134,28 @@ class TextPolicyNetwork(nn.Module):
         self._compliance_temperature = max(1e-4, compliance_temperature)
         self._invalid_logit_penalty = abs(invalid_logit_penalty)
 
-    def _adjust_logits_with_compliance(
+    def _mask_logits(
             self,
             logits: torch.Tensor,
             prev_tokens: torch.Tensor,
             finished: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         if self._word_checker is None or self._tokenizer_ref is None:
-            return logits
+            allowed_mask = torch.ones_like(logits, dtype=torch.bool)
+            return logits, allowed_mask
         summary_token_ids = self._tokenizer_ref.summary_token_ids
         if not summary_token_ids:
-            return logits
+            allowed_mask = torch.ones_like(logits, dtype=torch.bool)
+            return logits, allowed_mask
         adjusted = logits.clone()
+        allowed_mask = torch.zeros_like(logits, dtype=torch.bool)
         eos_id = self.eos_token_id
         candidate_count = len(summary_token_ids) + 1
         for batch_idx in range(logits.size(0)):
+            mask_row = allowed_mask[batch_idx]
             if finished[batch_idx]:
+                mask_row[eos_id] = True
+                adjusted[batch_idx, ~mask_row] = COMPLIANCE_MASK_FILL_VALUE
                 continue
             prev_token_id = int(prev_tokens[batch_idx].item())
             prev_char = self._tokenizer_ref.token_from_id(prev_token_id)
@@ -2159,22 +2170,28 @@ class TextPolicyNetwork(nn.Module):
                     allowed_ids.add(token_id)
             if not allowed_ids:
                 allowed_ids.add(eos_id)
-            mask = torch.ones_like(adjusted[batch_idx], dtype=torch.bool)
-            mask[list(allowed_ids)] = False
-            if not torch.any(mask).item():
-                continue
-            adjusted[batch_idx, mask] = adjusted[batch_idx, mask] - self._invalid_logit_penalty
+            for token_id in allowed_ids:
+                mask_row[token_id] = True
+            disallowed = ~mask_row
+            adjusted[batch_idx, disallowed] = COMPLIANCE_MASK_FILL_VALUE
             if (
                     self._compliance_temperature < 1.0
-                    and len(allowed_ids) < candidate_count
+                    and mask_row.sum().item() < candidate_count
             ):
-                allowed_tensor = torch.tensor(
-                    list(allowed_ids), dtype=torch.long, device=adjusted.device
+                allowed_indices = mask_row.nonzero(as_tuple=False).squeeze(-1)
+                adjusted[batch_idx, allowed_indices] = (
+                    adjusted[batch_idx, allowed_indices] / self._compliance_temperature
                 )
-                adjusted[batch_idx, allowed_tensor] = (
-                        adjusted[batch_idx, allowed_tensor] / self._compliance_temperature
-                )
-        return adjusted
+        return adjusted, allowed_mask
+
+    def _adjust_logits_with_compliance(
+            self,
+            logits: torch.Tensor,
+            prev_tokens: torch.Tensor,
+            finished: torch.Tensor,
+    ) -> torch.Tensor:
+        masked_logits, _ = self._mask_logits(logits, prev_tokens, finished)
+        return masked_logits
 
     def forward(
             self, tokens: torch.Tensor, lengths: torch.Tensor
@@ -2217,6 +2234,32 @@ class TextPolicyNetwork(nn.Module):
             "action_lengths": mask.sum(dim=-1),
         }
         return action_tensor, info
+
+    def first_step_distribution(
+            self, tokens: torch.Tensor, lengths: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        embedded = self.embedding(tokens)
+        packed = pack_padded_sequence(
+            embedded, lengths.cpu(), batch_first=True, enforce_sorted=False
+        )
+        _, hidden = self.encoder(packed)
+        batch_size = tokens.size(0)
+        prev_tokens = torch.full(
+            (batch_size,),
+            fill_value=self.bos_token_id,
+            dtype=torch.long,
+            device=tokens.device,
+        )
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=tokens.device)
+        prev_emb = self.embedding(prev_tokens).unsqueeze(1)
+        decoder_out, hidden_state = self.decoder(prev_emb, hidden)
+        raw_logits = self.output_layer(decoder_out.squeeze(1))
+        logits, allowed_mask = self._mask_logits(raw_logits, prev_tokens, finished)
+        probs = torch.softmax(logits, dim=-1)
+        probs = probs.clamp_min(1e-12)
+        probs = probs / probs.sum(dim=-1, keepdim=True)
+        log_probs = torch.log(probs)
+        return logits, probs, log_probs, allowed_mask
 
     def deterministic(self, tokens: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
         embedded = self.embedding(tokens)
@@ -2393,7 +2436,14 @@ class DemoSACAgent(SACAgent):
         self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr=3e-4)
         self.q1_optimizer = torch.optim.Adam(self.q1.parameters(), lr=3e-4)
         self.q2_optimizer = torch.optim.Adam(self.q2.parameters(), lr=3e-4)
-        self.alpha = self.config.alpha
+        self.top_p = getattr(self.config, "top_p", 0.98)
+        self.entropy_kappa = getattr(self.config, "entropy_kappa", 0.9)
+        alpha_init = float(max(ALPHA_MIN, min(ALPHA_MAX, self.config.alpha)))
+        self.log_alpha = torch.tensor(
+            math.log(alpha_init), dtype=torch.float32, device=self.device, requires_grad=True
+        )
+        alpha_lr = getattr(self.config, "alpha_lr", 1e-4)
+        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=alpha_lr)
         self.parameter_count = sum(
             parameter.numel() for parameter in self.policy.parameters()
         )
@@ -2404,6 +2454,113 @@ class DemoSACAgent(SACAgent):
 
     def _encode_action(self, action: TextAction) -> List[int]:
         return action.token_ids
+
+    def _select_top_p(
+            self,
+            probs: torch.Tensor,
+            allowed_mask: torch.Tensor,
+            top_p: float,
+            *,
+            detach_selection: bool,
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+        batch_size, vocab_size = probs.shape
+        selection_probs = probs.detach() if detach_selection else probs
+        selected_indices: list[torch.Tensor] = []
+        normalized_weights: list[torch.Tensor] = []
+        log_probs: list[torch.Tensor] = []
+        threshold = min(max(top_p, 0.0), 1.0)
+        for batch_idx in range(batch_size):
+            mask_row = allowed_mask[batch_idx]
+            if mask_row.any():
+                candidate_idx = mask_row.nonzero(as_tuple=False).squeeze(-1)
+            else:
+                candidate_idx = torch.arange(vocab_size, device=probs.device)
+            candidate_probs = selection_probs[batch_idx, candidate_idx]
+            if candidate_probs.numel() == 0:
+                candidate_idx = torch.argmax(selection_probs[batch_idx]).view(1)
+                candidate_probs = selection_probs[batch_idx, candidate_idx]
+            sorted_probs, sort_idx = torch.sort(candidate_probs, descending=True)
+            sorted_indices = candidate_idx[sort_idx]
+            if sorted_probs.numel() == 1 or threshold >= 1.0 - 1e-6:
+                cutoff = sorted_probs.numel()
+            else:
+                cumulative = torch.cumsum(sorted_probs, dim=0)
+                cutoff_mask = cumulative <= threshold
+                cutoff = int(cutoff_mask.sum().item())
+                if cutoff < sorted_probs.size(0):
+                    cutoff += 1
+                cutoff = max(1, cutoff)
+            selected = sorted_indices[:cutoff]
+            selected_indices.append(selected)
+            true_probs = probs[batch_idx, selected]
+            mass = true_probs.sum()
+            if mass <= 0:
+                true_probs = torch.full_like(true_probs, fill_value=1.0 / true_probs.numel())
+                mass = true_probs.sum()
+            weights = true_probs / mass.clamp(min=1e-8)
+            normalized_weights.append(weights)
+            logp = torch.log(probs[batch_idx, selected].clamp_min(1e-12))
+            log_probs.append(logp)
+        return selected_indices, normalized_weights, log_probs
+
+    def _evaluate_q_candidates(
+            self,
+            state_tokens: torch.Tensor,
+            state_lengths: torch.Tensor,
+            candidate_indices: list[torch.Tensor],
+            network_primary: TextQNetwork,
+            network_secondary: TextQNetwork | None = None,
+    ) -> list[torch.Tensor]:
+        sequences_state: list[list[int]] = []
+        sequences_action: list[list[int]] = []
+        counts: list[int] = []
+        for batch_idx, indices in enumerate(candidate_indices):
+            index_list = indices.tolist()
+            counts.append(len(index_list))
+            if not index_list:
+                continue
+            state_seq = state_tokens[batch_idx, : state_lengths[batch_idx]].detach().tolist()
+            for action_id in index_list:
+                sequences_state.append(state_seq)
+                sequences_action.append([int(action_id)])
+        per_batch_values: list[torch.Tensor] = [torch.empty(0, device=self.device) for _ in candidate_indices]
+        if not sequences_state:
+            return per_batch_values
+        state_batch, state_len_batch = self.tokenizer.batch_encode(sequences_state, device=self.device)
+        action_batch, action_len_batch = self.tokenizer.batch_encode(sequences_action, device=self.device)
+        q_primary = network_primary(state_batch, state_len_batch, action_batch, action_len_batch)
+        if network_secondary is not None:
+            q_secondary = network_secondary(state_batch, state_len_batch, action_batch, action_len_batch)
+            values = torch.min(q_primary, q_secondary)
+        else:
+            values = q_primary
+        values = values.squeeze(-1)
+        offset = 0
+        for batch_idx, count in enumerate(counts):
+            if count == 0:
+                continue
+            chunk = values[offset: offset + count]
+            per_batch_values[batch_idx] = chunk
+            offset += count
+        return per_batch_values
+
+    def _combine_expectations(
+            self,
+            weights: list[torch.Tensor],
+            log_probs: list[torch.Tensor],
+            q_values: list[torch.Tensor],
+            alpha: torch.Tensor,
+    ) -> torch.Tensor:
+        expectations: list[torch.Tensor] = []
+        for weight_vec, logp_vec, q_vec in zip(weights, log_probs, q_values):
+            if weight_vec.numel() == 0:
+                expectations.append(torch.tensor(0.0, device=self.device))
+                continue
+            expectations.append(torch.sum(weight_vec * (q_vec - alpha * logp_vec)))
+        if not expectations:
+            return torch.zeros((0, 1), device=self.device)
+        stacked = torch.stack(expectations)
+        return stacked.unsqueeze(-1)
 
     def act(self, state: TextObservation, deterministic: bool = False) -> TextAction:
         tokens, lengths = self.tokenizer.batch_encode(
@@ -2456,23 +2613,26 @@ class DemoSACAgent(SACAgent):
         )
 
         with torch.no_grad():
-            next_action_tokens, next_info = self.policy(next_state_tokens, next_state_lengths)
-            next_action_lengths = next_info["action_lengths"].long().clamp(min=1)
-            target_q1 = self.target_q1(
+            _, next_probs, next_log_probs, next_allowed_mask = self.policy.first_step_distribution(
+                next_state_tokens, next_state_lengths
+            )
+            top_indices_next, weights_next, log_probs_next = self._select_top_p(
+                next_probs, next_allowed_mask, self.top_p, detach_selection=True
+            )
+            min_q_candidates = self._evaluate_q_candidates(
                 next_state_tokens,
                 next_state_lengths,
-                next_action_tokens,
-                next_action_lengths,
+                top_indices_next,
+                self.target_q1,
+                self.target_q2,
             )
-            target_q2 = self.target_q2(
-                next_state_tokens,
-                next_state_lengths,
-                next_action_tokens,
-                next_action_lengths,
+            alpha_detached = torch.exp(self.log_alpha.detach())
+            target_value = self._combine_expectations(
+                weights_next,
+                log_probs_next,
+                min_q_candidates,
+                alpha_detached,
             )
-            target_value = torch.min(target_q1, target_q2) - self.alpha * next_info[
-                "log_prob"
-            ]
             target_q = rewards + self.config.gamma * (1.0 - dones) * target_value
 
         current_q1 = self.q1(state_tokens, state_lengths, action_tokens, action_lengths)
@@ -2490,23 +2650,50 @@ class DemoSACAgent(SACAgent):
 
         for parameter in self.q1.parameters():
             parameter.requires_grad_(False)
-        new_action_tokens, policy_info = self.policy(state_tokens, state_lengths)
-        new_action_lengths = policy_info["action_lengths"].long().clamp(min=1)
-        q1_for_policy = self.q1(
+        for parameter in self.q2.parameters():
+            parameter.requires_grad_(False)
+        _, policy_probs, policy_log_probs, policy_allowed_mask = self.policy.first_step_distribution(
+            state_tokens, state_lengths
+        )
+        top_indices_policy, weights_policy, log_probs_policy = self._select_top_p(
+            policy_probs, policy_allowed_mask, self.top_p, detach_selection=True
+        )
+        q1_policy_candidates = self._evaluate_q_candidates(
             state_tokens,
             state_lengths,
-            new_action_tokens,
-            new_action_lengths,
+            top_indices_policy,
+            self.q1,
         )
-        policy_loss = (
-                self.alpha * policy_info["log_prob"] - q1_for_policy
-        ).mean()
+        alpha_current = torch.exp(self.log_alpha.detach())
+        policy_terms: list[torch.Tensor] = []
+        for weight_vec, logp_vec, q_vec in zip(weights_policy, log_probs_policy, q1_policy_candidates):
+            if weight_vec.numel() == 0:
+                policy_terms.append(torch.tensor(0.0, device=self.device))
+                continue
+            policy_terms.append(torch.sum(weight_vec * (alpha_current * logp_vec - q_vec)))
+        if policy_terms:
+            policy_loss = torch.stack(policy_terms).mean()
+        else:
+            policy_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
 
         self.policy_optimizer.zero_grad()
         policy_loss.backward()
         self.policy_optimizer.step()
         for parameter in self.q1.parameters():
             parameter.requires_grad_(True)
+        for parameter in self.q2.parameters():
+            parameter.requires_grad_(True)
+
+        entropy_values = -(policy_probs * policy_log_probs).sum(dim=-1)
+        legal_counts = policy_allowed_mask.sum(dim=-1).clamp(min=1).float()
+        target_entropy = self.entropy_kappa * torch.log(legal_counts)
+        alpha_loss = - (self.log_alpha * (target_entropy.detach() - entropy_values.detach())).mean()
+        self.alpha_optimizer.zero_grad()
+        alpha_loss.backward()
+        self.alpha_optimizer.step()
+        with torch.no_grad():
+            self.log_alpha.data.clamp_(math.log(ALPHA_MIN), math.log(ALPHA_MAX))
+        alpha_value = torch.exp(self.log_alpha.detach())
 
         with torch.no_grad():
             for target_param, param in zip(self.target_q1.parameters(), self.q1.parameters()):
@@ -2524,6 +2711,7 @@ class DemoSACAgent(SACAgent):
             "q1_loss": float(q1_loss.item()),
             "q2_loss": float(q2_loss.item()),
             "average_reward": average_reward,
+            "alpha": float(alpha_value.item()),
         }
 
     def save(self, destination: MutableMapping[str, Any]) -> None:  # pragma: no cover - placeholder
@@ -2675,6 +2863,15 @@ class DemoTrainer(Trainer):
             )
             teacher_interval = self._character_teacher_interval if character_mode else 0
             use_teacher = character_mode and teacher_interval > 0 and (step % teacher_interval == 0)
+            target_text = ""
+            if character_mode:
+                if round_pairs and step - 1 < len(round_pairs):
+                    target_text = round_pairs[step - 1]
+                elif self._char_pairs_per_round:
+                    candidates = self._char_pairs_per_round[(round_index - 1) % len(self._char_pairs_per_round)]
+                    if step - 1 < len(candidates):
+                        target_text = candidates[step - 1]
+
             if character_mode:
                 truth_pair = (
                     round_pairs[step - 1]
@@ -2693,8 +2890,8 @@ class DemoTrainer(Trainer):
 
             if character_mode:
                 sanitized_prev = state.previous_summary
-                sanitized_chapter = state.chapter_text
-                source_text = state.previous_summary + state.chapter_text
+                sanitized_chapter = target_text
+                source_text = state.previous_summary + target_text
                 source_preview_text = source_text
             else:
                 sanitized_prev = state.previous_summary.replace("\n", "\\n")
@@ -2723,7 +2920,7 @@ class DemoTrainer(Trainer):
             )
 
             if use_teacher:
-                reference_text = state.chapter_text
+                reference_text = target_text if character_mode else state.chapter_text
                 action = _create_text_action(reference_text, self.agent.tokenizer)
                 stanza_lines.append("           | action_source=teacher")
             elif use_reference:
