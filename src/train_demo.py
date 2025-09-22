@@ -1169,8 +1169,8 @@ def _describe_reward_quality(value: float) -> str:
         return "本次获得爆发式奖励"
     if value >= 1.2:
         return "本次获得显著正向反馈"
-    if value > 0.6:
-        return "本次获得中等奖励"
+    if value >= 0.8:
+        return "本次获得最高奖励"
     if value > 0.0:
         return "本次获得轻度奖励"
     return "本次未获得奖励"
@@ -2946,10 +2946,9 @@ class DemoTrainer(Trainer):
                 raw_text_for_preview = action.text.replace("\n", "\\n")
             summary_len, summary_preview = _format_text_debug(summary_text_for_preview, 20, 20)
             raw_summary_len, raw_summary_preview = _format_text_debug(raw_text_for_preview, 20, 20)
-            if raw_summary_preview != summary_preview:
-                stanza_lines.append(
-                    f"           | raw_action={raw_summary_len:04d} chars \"{raw_summary_preview}\""
-                )
+            stanza_lines.append(
+                f"           | raw_action={raw_summary_len:04d} chars \"{raw_summary_preview}\""
+            )
             total_reward += transition.reward
             summary_length_value = float(metrics.get("summary_length", summary_len))
             log_metrics: MutableMapping[str, Any] = {

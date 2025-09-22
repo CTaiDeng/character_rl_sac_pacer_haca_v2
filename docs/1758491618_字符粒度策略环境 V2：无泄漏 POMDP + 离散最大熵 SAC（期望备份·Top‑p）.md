@@ -404,3 +404,33 @@ $\arg\max_\pi \mathbb{E}\sum_t \gamma^t r'_t=\arg\max_\pi \mathbb{E}\sum_t \gamm
 * **Top‑p 期望**：`DemoSACAgent.update` 的 `_select_top_p`/`_evaluate_q_candidates` 组合在目标和策略两侧均采用截断重归一的概率，保持 $(1-done)$ 截断和 Twin-Q 最小化。
 * **温度自适应**：维护 `log_alpha`（Adam 优化，学习率可配置），执行 $\log\alpha \leftarrow \log\alpha + \eta(H_{\text{tgt}}-H)$ 并限制 $\alpha\in[10^{-4},2]$；更新返回实时 `alpha` 供监控。
 * **Trainer 日志同步**：字符模式下 `DemoTrainer.run` 使用轮次教师对进行日志与教师干预，保证代理观测与回放的一致性。
+
+> **示例**（原文片段 “这五个字像一道闪电…” 中“意味着什么” 的字符展开）：
+
+```
+Step 01 | prev_summary=0001 chars "这"
+       | chapter=0001 chars "意"
+       | source=0002 chars "这意"
+       | action_source=teacher
+       | raw_action=0001 chars "味"
+       -> summary=0001 chars "意"
+       reward=0.803241 (base=+1.000000, potential=+0.000000, soft=+0.803241; 本次获得最高奖励)
+
+Step 02 | prev_summary=0001 chars "意"
+       | chapter=0001 chars "味"
+       | source=0002 chars "意味"
+       | action_source=teacher
+       | raw_action=0001 chars "着"
+       -> summary=0001 chars "味"
+       reward=0.803241 (base=+1.000000, potential=+0.000000, soft=+0.803241; 本次获得最高奖励)
+
+Step 03 | prev_summary=0001 chars "味"
+       | chapter=0001 chars "着"
+       | source=0002 chars "味着"
+       | action_source=teacher
+       | raw_action=0001 chars "什"
+       -> summary=0001 chars "着"
+       reward=0.803241 (base=+1.000000, potential=+0.000000, soft=+0.803241; 本次获得最高奖励)
+```
+
+该日志由 `DemoTrainer` 自动生成，前两行展示观测窗口（历史/目标字符），`raw_action` 为策略输出字符，`summary` 为环境记账后的最新历史，结尾列出奖励拆分，便于人工复核。
