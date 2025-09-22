@@ -1176,6 +1176,20 @@ def _describe_reward_quality(value: float) -> str:
     return "本次未获得奖励"
 
 
+def _format_reward_component(value: float) -> str:
+    """Format a reward component into human-readable text (含“满分”标签)."""
+
+    if math.isnan(value):
+        return "缺失"
+    if value >= 0.999:
+        return "满分"
+    if value <= -0.999:
+        return "负满分"
+    if abs(value) < 1e-6:
+        return "0.000000"
+    return f"{value:+.6f}"
+
+
 def _clamp_unit_interval(value: float) -> float:
     """Clamp ``value`` to the inclusive range ``[0, 1]``."""
 
@@ -2939,7 +2953,7 @@ class DemoTrainer(Trainer):
 
             canonical_summary_text = metrics.get("canonical_summary_text", action.text)
             if character_mode:
-                summary_text_for_preview = canonical_summary_text
+                summary_text_for_preview = target_text if target_text else canonical_summary_text
                 raw_text_for_preview = action.text
             else:
                 summary_text_for_preview = canonical_summary_text.replace("\n", "\\n")
@@ -3039,9 +3053,9 @@ class DemoTrainer(Trainer):
                 block_color = ANSI_YELLOW
             reward_line = (
                 f"{metric_indent}reward={transition.reward:.6f} "
-                f"(base={metrics.get('reward_base', 0.0):+.6f}, "
-                f"potential={metrics.get('reward_potential_gain', 0.0):+.6f}, "
-                f"soft={metrics.get('reward_soft_bonus', 0.0):+.6f}; {reward_quality})"
+                f"(base={_format_reward_component(metrics.get('reward_base', 0.0))}, "
+                f"potential={_format_reward_component(metrics.get('reward_potential_gain', 0.0))}, "
+                f"soft={_format_reward_component(metrics.get('reward_soft_bonus', 0.0))}; {reward_quality})"
             )
 
             base_lines = stanza_lines + [summary_line]

@@ -414,7 +414,7 @@ Step 01 | prev_summary=0001 chars "这"
        | action_source=teacher
        | raw_action=0001 chars "味"
        -> summary=0001 chars "意"
-       reward=0.803241 (base=+1.000000, potential=+0.000000, soft=+0.803241; 本次获得最高奖励)
+       reward=0.803241 (base=满分, potential=满分, soft=满分; 本次获得最高奖励)
 
 Step 02 | prev_summary=0001 chars "意"
        | chapter=0001 chars "味"
@@ -422,7 +422,7 @@ Step 02 | prev_summary=0001 chars "意"
        | action_source=teacher
        | raw_action=0001 chars "着"
        -> summary=0001 chars "味"
-       reward=0.803241 (base=+1.000000, potential=+0.000000, soft=+0.803241; 本次获得最高奖励)
+       reward=0.803241 (base=满分, potential=满分, soft=满分; 本次获得最高奖励)
 
 Step 03 | prev_summary=0001 chars "味"
        | chapter=0001 chars "着"
@@ -430,7 +430,23 @@ Step 03 | prev_summary=0001 chars "味"
        | action_source=teacher
        | raw_action=0001 chars "什"
        -> summary=0001 chars "着"
-       reward=0.803241 (base=+1.000000, potential=+0.000000, soft=+0.803241; 本次获得最高奖励)
+       reward=0.803241 (base=满分, potential=满分, soft=满分; 本次获得最高奖励)
+
+Step 04 | prev_summary=0001 chars "着"
+       | chapter=0001 chars "什"
+       | source=0002 chars "着什"
+       | action_source=teacher
+       | raw_action=0001 chars "么"
+       -> summary=0001 chars "什"
+       reward=0.803241 (base=满分, potential=满分, soft=满分; 本次获得最高奖励)
+
+Step 05 | prev_summary=0001 chars "什"
+       | chapter=0001 chars "么"
+       | source=0002 chars "什么"
+       | action_source=teacher
+       | raw_action=0001 chars "？"
+       -> summary=0001 chars "么"
+       reward=0.803241 (base=满分, potential=满分, soft=满分; 本次获得最高奖励)
 ```
 
 该日志由 `DemoTrainer` 自动生成，前两行展示观测窗口（历史/目标字符），`raw_action` 为策略输出字符，`summary` 为环境记账后的最新历史，结尾列出奖励拆分，便于人工复核。
