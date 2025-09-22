@@ -1,86 +1,46 @@
 # 当前网络拓扑结构设计方案
 
-## 总览
-- **观察编码**：上一轮的认知资本快照与当前章节字符序列按顺序拼接，形成 `[<bos>] + capital_snapshot + [<sep>] + chapter + [<eos>]`。
-- **行动解码**：策略网络输出字符序列，对应一组按行排列的操作指令（ACQUIRE/EXTRACT/VERIFY/…）。
-- **核心组件**：
-  1. 字符级嵌入层（共用词表），将观察序列映射到向量空间；
-  2. 编码器 GRU 提取观察上下文隐藏状态；
-  3. 解码器 GRU 自回归地产生操作字符分布，并在采样前应用合规屏蔽与温度调节；
-  4. 双路 Q 网络评估状态-动作对，用于最大熵 SAC 更新；
-  5. `CapitalValuator` 提供潜能与估值，用于奖励塑形和日志记录。
-
-## 策略网络拓扑
-设字符词表大小为 `|V|`，最大解码长度为 `L_max`。策略网络 `π_θ` 的结构：
-1. **Embedding**：`E ∈ ℝ^{|V| × d_emb}`，将观察序列映射为张量 `Z`。
-2. **编码器 GRU**：`h_enc = GRU_enc(Z)`，输出最终隐藏状态作为上下文向量。
-3. **解码器 GRU**：以 `h_enc` 作为初始状态，逐步生成字符；每一步：
-   - 取上一字符嵌入 `y_emb`；
-   - 解码器输出 `h_dec`；
-   - 线性层得到 logits；
-   - `WordComplianceChecker` 与 `OperationParser` 提供的允许集合用于屏蔽非法字符，并在允许集合上施加温度；
-   - 通过 `Categorical(logits)` 采样（或取 argmax）。
-4. **潜能塑形**：策略本身不直接使用潜能，但环境在奖励侧使用 `CapitalValuator.potential()`，与策略网络的输出长度无关。
-
-伪代码如下：
+## 策略网络 $\pi_\theta$
+策略网络为字符级序列到序列结构，输入 Token 序列 $x_t \in \mathbb{N}^{L}$，embedding 维度 $d=96$，隐藏维度 $h=128$。
+编码器 GRU 计算 $h^{\text{enc}} = \mathrm{GRU}_{\text{enc}}(E x_t)$，其中 $E \in \mathbb{R}^{|V|\times d}$。
+解码端以 $h^{\text{enc}}$ 为初始状态，逐步应用 $\mathrm{GRU}_{\text{dec}}$，输出 logits $z_\tau = W h_\tau + b$，再经合规筛选。
+合规模块根据 `WordComplianceChecker` 给出的允许字符集合 $\mathcal{A}(y_{\tau-1})$ 对 logits 进行遮罩，并按温度 $\tau_c=0.85$ 重新缩放。
+最终动作分布 $p_\theta(y_\tau \mid y_{<\tau}, x_t) = \mathrm{Softmax}(\tilde{z}_\tau)$，在训练时采样，在评估时取 argmax。
+- 嵌入层：共享词表大小 $|V| \approx 1600$（随语料自动统计），\`embedding\` 权重与价值网络共享初始化种子。
+- 编码器：单层 GRU（隐藏 128），使用 `pack_padded_sequence` 处理变长输入。
+- 解码器：单层 GRU 加线性层输出 logits，生成长度上限 $L_{\max}=512$（由章节长度截断）。
+- 合规温度与惩罚：使用 `DEFAULT_COMPLIANCE_TEMPERATURE=0.85`、`COMPLIANCE_INVALID_LOGIT_PENALTY=12.0` 限制非法字符概率。
+## 价值网络 $Q_\phi, Q_\psi$
+价值网络共享 `TextQNetwork` 拓扑，使用相同词表嵌入并计算遮罩平均。
+状态摘要 $u = \tanh(W_s \cdot \mathrm{mean}_{\mathrm{mask}}(E x_t))$，动作摘要 $v = \tanh(W_a \cdot \mathrm{mean}_{\mathrm{mask}}(E y_t))$，连接后经两层 MLP 输出标量。
+双路网络 $(Q_\phi, Q_\psi)$ 参数独立，目标网络通过软更新 $\theta^{\prime} \leftarrow \tau \theta + (1-\tau) \theta^{\prime}$，其中 $\tau = \texttt{TrainerConfig.tau}$。
+## 采样与温度伪代码
 ```pseudo
-function POLICY_FORWARD(x_tokens):
-    z = embedding(x_tokens)
-    _, h = encoder_gru(pack(z))
-    y_prev = <bos>
+function SAMPLE_POLICY(tokens, lengths):
+    embedded = embedding(tokens)
+    _, h_enc = encoder(embedded, lengths)
+    prev = BOS
     outputs = []
-    log_probs = []
-    finished = false
-    for step in 1..L_max:
-        y_emb = embedding(y_prev)
-        h, dec_out = decoder_gru(y_emb, h)
-        logits = linear(dec_out)
-        logits = apply_compliance(logits, y_prev)
-        y_curr ~ Categorical(logits)
-        outputs.append(y_curr)
-        log_probs.append(log_prob(y_curr))
-        finished = finished or (y_curr == <eos>)
-        if finished:
-            break
-        y_prev = y_curr
-    return stack(outputs), sum(log_probs)
+    for step in range(L_max):
+        logits, h_enc = decoder_step(prev, h_enc)
+        allowed = compliance(prev)
+        logits[not allowed] -= penalty
+        logits[allowed] /= tau_c
+        dist = Categorical(logits)
+        sample = dist.sample()
+        outputs.append(sample)
+        if sample == EOS: break
+        prev = sample
+    return outputs
 ```
-
-`apply_compliance` 会：
-- 根据 `WordComplianceChecker` 提供的合法字符集合屏蔽非法 logits；
-- 对合法集合按照温度 `τ=0.85` 重新缩放。
-
-## 价值网络拓扑
-价值网络 `Q_φ` 与 `Q_ψ` 结构保持轻量：
-1. 共享嵌入层编码状态与动作字符序列；
-2. 通过掩码平均池化得到状态向量 `u` 与动作向量 `v`；
-3. 两层前馈网络输出标量 Q 值。
-
-伪代码：
-```pseudo
-function Q_FORWARD(state_tokens, action_tokens):
-    s = embedding(state_tokens)
-    a = embedding(action_tokens)
-    u = tanh(W_s * masked_mean(s))
-    v = tanh(W_a * masked_mean(a))
-    q = FFN(concat(u, v))
-    return q
-```
-
-## 潜能塑形与奖励逻辑
-- `CapitalValuator` 基于当前资本计算覆盖、多样、冗余、验证四项指标，生成估值 `value(capital)`；
-- 环境每步奖励：`r_t = base_reward + potential(capital_t) - potential(capital_{t-1})`，其中 `base_reward` 仅在终止步骤包含估值与成本差；
-- 成本由操作成本与预算透支罚项组成，使策略在最大化估值同时控制资源消耗。
-
-## 数据流
-1. 观察编码：`capital_snapshot_{t-1} + chapter_t → tokenizer → tokens`；
-2. 策略解码：`tokens → π_θ → action_text`；
-3. 操作执行：`OperationParser.parse(action_text)` → `CognitiveCapital.apply()` → 更新资本与预算；
-4. 估值：`CapitalValuator.metrics()` 产出日志指标并为奖励塑形提供潜能值；
-5. 价值更新：`Q_φ, Q_ψ` 在最大熵 SAC 中与策略共同训练。
-
-任何关于策略或价值网络的结构调整（嵌入维度、RNN 类型、合规策略、潜能定义等），都需同步修改本文与输入输出说明文档。
-
-## 估值与日志支路
-- `CapitalValuator.metrics()` 输出 `capital_value`, `capital_coverage`, `capital_diversity`, `capital_redundancy`, `capital_verification_ratio` 等字段，并写入 step CSV。
-- 预算与成本通过 `budget_remaining`, `budget_breach`, `operation_cost`, `cumulative_cost` 字段落盘，便于分析资源使用情况。
+## 参数配置与训练超参
+- 关键维度：`embedding_dim=96`，`hidden_dim=128`，`max_summary_length` 由章节最大长度截断（不超过 512）。
+- 优化器：策略与 Q 网络均使用 Adam(LR=3e-4)，熵系数 `alpha` 来自 `AgentConfig` 初始设置并在更新过程中自适应。
+- 更新节奏：每步收集 1 条样本，`DemoSACAgent.update` 在 `updates_per_round = steps_per_round` 条目上执行，软更新系数 `tau=TrainerConfig.tau`。
+- 参数规模：`DemoSACAgent.parameter_count` 统计策略网络参数量并写入导出，便于推断模型大小 `MODEL_SIZE_BYTES`。
+## 数据流摘要
+- 观测编码：`CharTokenizer.encode_observation` 共享给策略与价值网络。
+- 策略采样：`TextPolicyNetwork` 输出字符动作，经 `OperationParser.parse` 转化为结构化操作并更新 `CognitiveCapital`。
+- 价值评估：双路 `TextQNetwork` 在训练时接收状态与策略采样动作，构造目标 $y = r + \gamma(\min(Q_\phi, Q_\psi) - \alpha \log \pi)$。
+- 参数更新：策略目标使用 $J_\pi = \mathbb{E}[\alpha \log \pi_\theta(a\mid s) - Q_\phi(s,a)]$，Q 目标使用 MSE，软更新由 `tau` 控制。
+如需调整网络维度、合规模块或目标定义，请同步修改实现与本文档。
