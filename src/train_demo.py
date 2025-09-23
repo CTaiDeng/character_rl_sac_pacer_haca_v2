@@ -2134,15 +2134,17 @@ class ArticleEnvironment:
             potential_component += CHARACTER_POTENTIAL_QUALITY_WEIGHT * quality_signal
         reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
-            bigram_candidate = source_text if len(source_text) == 2 else ""
+            predicted_action_char = (display_action_text or "")[:1]
+            bigram_candidate = (target_char or "") + predicted_action_char
             match_char = bool(target_char and canonical_summary == target_char)
-            if bigram_candidate:
+            if len(bigram_candidate) == 2:
                 if bigram_candidate in self._lexical_bigram_pairs:
                     lexical_bigram_bonus = CHARACTER_LEXICAL_BIGRAM_BONUS
                 elif match_char:
                     lexical_bigram_bonus = CHARACTER_TEACHER_BIGRAM_FALLBACK
             applied_lexical_bonus = lexical_bigram_bonus if match_char else 0.0
             base_component += applied_lexical_bonus
+            reward = base_component + potential_component + soft_component
             reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
             predicted_char = canonical_summary[:1] if canonical_summary else ""
@@ -3243,7 +3245,6 @@ class DemoTrainer(Trainer):
             if character_mode:
                 for stored_line in log_lines:
                     _console_log(stored_line, color=block_color)
-                _console_log("", color=block_color)
             else:
                 for stored_line in log_lines:
                     _console_log(stored_line, color=block_color)

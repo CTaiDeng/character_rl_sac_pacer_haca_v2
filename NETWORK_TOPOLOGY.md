@@ -40,7 +40,7 @@ function SAMPLE_POLICY(tokens, lengths):
 - 更新节奏：每步收集 1 条样本，`DemoSACAgent.update` 在 `updates_per_round = steps_per_round` 条目上执行，软更新系数 `tau=TrainerConfig.tau`。
 - 参数规模：`DemoSACAgent.parameter_count` 统计策略网络参数量并写入导出，便于推断模型大小 `MODEL_SIZE_BYTES`。
 - 字符模式长度字段：`character_length_field_width` 控制日志中 `prev_summary=... chars` 的宽度（默认 1，无补零）。
-- 字符二元奖励：若上一字符与目标字符组合命中 `data/chinese_frequency_word.json` 或 `data/chinese_name_frequency_word.json` 的二字词，或命中原文滑窗中的二元组合，则在 `reward_base` 上追加 `CHARACTER_LEXICAL_BIGRAM_BONUS=1.0`；未命中但与教师一致时给与 0.5 回退奖励，并结合 0.5/0.25 的质量加权同步提升基础与潜在得分。
+- 字符二元奖励：若目标字符与当前预测字符拼接的二元组命中 `data/chinese_frequency_word.json` 或 `data/chinese_name_frequency_word.json` 的二字词，或命中原文滑窗中的二元组合，则在 `reward_base` 上追加 `CHARACTER_LEXICAL_BIGRAM_BONUS=1.0`；未命中但与教师一致时给与 0.5 回退奖励，并结合 0.5/0.25 的质量加权同步提升基础与潜在得分。
 - 词频补全：训练前通过  `_augment_lexical_statistics_with_bigrams` 将原文的二字词写回词频缓存。 
 - Top-p 采样：默认 `top_p=0.98`，使用 `first_step_distribution` 的概率并在选集上重新归一化后计算无偏期望。
 - 温度自适应：维护 `log_alpha` 参数，按 `logα ← logα + η(H_target - H)`（梯度化实现）更新并限制在 `[10^{-4}, 2]`。

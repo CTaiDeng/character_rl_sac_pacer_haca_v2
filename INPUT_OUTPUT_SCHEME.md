@@ -59,14 +59,16 @@ function STEP(environment_state, policy):
     base_reward = compute_base_reward(metrics, capital, budget, potential_before, potential_after, cost)
     soft_reward = compute_soft_reward(metrics)
     quality_signal = max(0, quality_component + lexical_component)
+    predicted_char <- extract_action_char(action)
+    bigram <- target_char ++ predicted_char
     if mode == "character":
         base_reward += 0.5 * quality_signal
         potential_gain += 0.25 * quality_signal
-    if mode == "character" and source_text.length == 2 and source_text in bigram_reference:
-        base_reward += CHARACTER_LEXICAL_BIGRAM_BONUS
-    elif mode == "character" and matches_teacher_target(source_text):
-        base_reward += 0.5
-    reward = base_reward + soft_reward
+        if length(bigram) == 2 and bigram in bigram_reference:
+            base_reward += CHARACTER_LEXICAL_BIGRAM_BONUS
+        elif length(bigram) == 2 and matches_teacher_target(predicted_char):
+            base_reward += 0.5
+    reward = base_reward + potential_gain + soft_reward
     next_text = capital.render_text(budget)
     next_observation = TextObservation(next_text, chi_{t+1}, t+1)
     return Transition(observation, action, reward, next_observation, done)
@@ -79,7 +81,7 @@ function STEP(environment_state, policy):
 - 资本估值：`CapitalValuator.metrics` 输出 `capital_value`、`capital_coverage`、`capital_diversity`、`capital_redundancy`、`capital_verification_ratio`、`capital_fact_count`。
 - 预算记录：输出 `budget_remaining`、`budget_breach`、`operation_cost`、`cumulative_cost` 以便分析资源消耗。
 - 回放缓存：`SimpleReplayBuffer.add` 存储 `Transition(state, action, reward, next_state, done)`，供 `DemoSACAgent.update` 抽样。
-- 字符二元奖励：字符模式额外输出 `lexical_bigram_bonus`（命中 `data/chinese_frequency_word.json` 或 `data/chinese_name_frequency_word.json` 的二字词，或来自原文滑窗时的奖励；若未命中但与教师一致则给予 0.5 回退奖励），便于监控拓扑记忆效果。
+- 字符二元奖励：字符模式额外输出 `lexical_bigram_bonus`（命中 `data/chinese_frequency_word.json` 或 `data/chinese_name_frequency_word.json` 的二字词，或来自原文滑窗时的奖励；若未命中但与教师一致则给予 0.5 回退奖励），该二元组由目标字符与预测字符拼接获得。
   常量 `CHARACTER_LEXICAL_BIGRAM_BONUS` 默认为 1.0，可通过代码调整以提高该拓扑记忆的权重。
 
 若调整观测格式、操作类型或估值指标，需要同步修改代码与本文档以保持一致。
