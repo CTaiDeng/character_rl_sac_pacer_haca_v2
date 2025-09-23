@@ -143,6 +143,30 @@ def _load_character_bigram_reference() -> set[str]:
                 pairs.add(token)
     return pairs
 
+# Track word files' modification time to support hot reload.
+_WORD_FILES_MTIME: dict[Path, float] = {}
+
+def _reload_word_catalog_if_stale() -> None:
+    global _WORD_FILES_MTIME
+    changed = False
+    for path in CHARACTER_BIGRAM_REFERENCE_PATHS:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if path not in _WORD_FILES_MTIME or _WORD_FILES_MTIME[path] != mtime:
+            _WORD_FILES_MTIME[path] = mtime
+            changed = True
+    if changed:
+        try:
+            _load_word_catalog.cache_clear()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        try:
+            _load_character_bigram_reference.cache_clear()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
 
 def _format_word_catalog_annotation(term: str) -> str:
     if term is None:
@@ -2022,6 +2046,9 @@ class ArticleEnvironment:
     ) -> None:
         """Reset the environment to operate over ``chapters`` with optional mode."""
 
+        # Ensure word catalogs reflect any on-disk updates before (re)building.
+        _reload_word_catalog_if_stale()
+
         segments = list(chapters)
         if not segments:
             raise ValueError("The environment requires at least one segment.")
@@ -2183,6 +2210,8 @@ class ArticleEnvironment:
         lexical_bigram_bonus = 0.0
         applied_lexical_bonus = 0.0
         bigram_candidate = ""
+        lexical_bigram_hit = False
+        lexical_bigram_sources: list[str] = []
         quality_signal = max(0.0, quality_component + lexical_component)
         soft_component = soft_reward
         base_component = base_reward
@@ -2218,6 +2247,13 @@ class ArticleEnvironment:
             if len(bigram_candidate) == 2:
                 if bigram_candidate in self._lexical_bigram_pairs:
                     lexical_bigram_bonus = CHARACTER_LEXICAL_BIGRAM_BONUS
+                    lexical_bigram_hit = True
+                    # Record sources for debugging (names + optional id if available)
+                    for label, entry_id in _load_word_catalog().get(bigram_candidate, []):
+                        if entry_id:
+                            lexical_bigram_sources.append(f"data/{label}#{entry_id}")
+                        else:
+                            lexical_bigram_sources.append(f"data/{label}")
                 elif match_char:
                     lexical_bigram_bonus = CHARACTER_TEACHER_BIGRAM_FALLBACK
             applied_lexical_bonus = lexical_bigram_bonus if match_char else 0.0
@@ -2268,6 +2304,8 @@ class ArticleEnvironment:
             "reward_soft_bonus": float(soft_component),
             "lexical_bigram_bonus": float(applied_lexical_bonus if self._iteration_mode == "character" else lexical_bigram_bonus),
             "lexical_bigram_candidate": bigram_candidate if self._iteration_mode == "character" else "",
+            "lexical_bigram_hit": bool(lexical_bigram_hit) if self._iteration_mode == "character" else False,
+            "lexical_bigram_sources": ", ".join(lexical_bigram_sources) if self._iteration_mode == "character" else "",
             "reward": reward,
             "canonical_summary_text": canonical_summary,
             "summary_raw_length": float(len(action.text)),
