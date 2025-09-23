@@ -146,10 +146,25 @@ def chinese_length(token: str) -> int:
 
 def load_common_words(path: Path) -> Set[str]:
     try:
-        data = json.loads(path.read_text(encoding='utf-8'))
-        return set(data)
+        raw = json.loads(path.read_text(encoding='utf-8'))
     except Exception:
         return set()
+    words: Set[str] = set()
+    if isinstance(raw, dict):
+        words.update(str(key).strip() for key in raw.keys() if str(key).strip())
+        return words
+    if not isinstance(raw, list):
+        return words
+    for item in raw:
+        if isinstance(item, str):
+            token = item.strip()
+            if token:
+                words.add(token)
+        elif isinstance(item, dict):
+            token = str(item.get('word', '')).strip()
+            if token:
+                words.add(token)
+    return words
 
 
 def strip_trailing_particles(base: str) -> str:

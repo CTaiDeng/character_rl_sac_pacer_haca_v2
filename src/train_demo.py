@@ -93,29 +93,86 @@ DEFAULT_REFERENCE_WARMUP_ROUNDS = 0
 DEFAULT_REFERENCE_WARMUP_STEPS = 5
 
 
+def _iter_word_entries(path: Path) -> list[tuple[str, str | None]]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+    entries: list[tuple[str, str | None]] = []
+    if isinstance(raw, dict):
+        for key in raw.keys():
+            word = str(key).strip()
+            if word:
+                entries.append((word, None))
+        return entries
+    if not isinstance(raw, list):
+        return entries
+    for item in raw:
+        if isinstance(item, str):
+            word = item.strip()
+            if word:
+                entries.append((word, None))
+            continue
+        if isinstance(item, dict):
+            word = str(item.get("word", "")).strip()
+            if not word:
+                continue
+            entry_id = item.get("id")
+            normalized_id = str(entry_id).strip() if entry_id is not None else None
+            entries.append((word, normalized_id if normalized_id else None))
+    return entries
+
+
+@lru_cache(maxsize=1)
+def _load_word_catalog() -> dict[str, list[tuple[str, str | None]]]:
+    catalog: dict[str, list[tuple[str, str | None]]] = {}
+    for path in CHARACTER_BIGRAM_REFERENCE_PATHS:
+        label = path.name
+        for word, entry_id in _iter_word_entries(path):
+            catalog.setdefault(word, []).append((label, entry_id))
+    return catalog
+
+
 @lru_cache(maxsize=1)
 def _load_character_bigram_reference() -> set[str]:
     pairs: set[str] = set()
     for path in CHARACTER_BIGRAM_REFERENCE_PATHS:
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            continue
-        except json.JSONDecodeError:
-            continue
-        if isinstance(raw, dict):
-            iterable = raw.keys()
-        elif isinstance(raw, list):
-            iterable = raw
-        else:
-            continue
-        for entry in iterable:
-            if not isinstance(entry, str):
-                continue
-            token = entry.strip()
+        for word, _entry_id in _iter_word_entries(path):
+            token = word.strip()
             if len(token) == 2 and not any(ch.isspace() for ch in token):
                 pairs.add(token)
     return pairs
+
+
+def _format_word_catalog_annotation(term: str) -> str:
+    if term is None:
+        return ""
+    lookup = term.strip()
+    if not lookup:
+        return ""
+    catalog = _load_word_catalog()
+    label_order = [
+        ("chinese_name_frequency_word.json", "data/chinese_name_frequency_word.json"),
+        ("chinese_frequency_word.json", "data/chinese_frequency_word.json"),
+    ]
+    label_to_id: dict[str, str | None] = {label: None for label, _display in label_order}
+    for label, entry_id in catalog.get(lookup, []):
+        if label not in label_to_id:
+            continue
+        if label_to_id[label] is None:
+            label_to_id[label] = entry_id if entry_id is not None else ""
+    parts: list[str] = []
+    for label, display in label_order:
+        entry_id = label_to_id[label]
+        if entry_id is None:
+            parts.append(f"{display}未命中")
+        elif entry_id == "":
+            parts.append(f"{display}命中(未编号)")
+        else:
+            parts.append(f"{display}#{entry_id}")
+    if not parts:
+        return ""
+    return " (" + "; ".join(parts) + ")"
 
 STEP_CSV_HEADERS = [
     "round",
@@ -3102,8 +3159,9 @@ class DemoTrainer(Trainer):
             stanza_lines.append(
                 f"           | chapter={chapter_len_str} chars \"{chapter_preview}\""
             )
+            source_annotation = _format_word_catalog_annotation(source_text)
             stanza_lines.append(
-                f"           | source={source_len_str} chars \"{source_preview}\""
+                f"           | source={source_len_str} chars \"{source_preview}\"{source_annotation}"
             )
 
             if use_teacher:
@@ -3155,8 +3213,9 @@ class DemoTrainer(Trainer):
                 bigram_length = len(combined_raw)
                 bigram_preview = combined_raw.replace("\n", "\\n").replace('"', '\"')
                 bigram_len_str = self._format_length(bigram_length, True)
+                bigram_annotation = _format_word_catalog_annotation(combined_raw)
                 stanza_lines.append(
-                    f'           | bigram={bigram_len_str} chars "{bigram_preview}"'
+                    f'           | bigram={bigram_len_str} chars "{bigram_preview}"{bigram_annotation}'
                 )
             total_reward += transition.reward
             summary_length_value = float(metrics.get("summary_length", summary_len))
