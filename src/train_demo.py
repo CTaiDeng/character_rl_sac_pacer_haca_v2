@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from functools import lru_cache
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
@@ -82,9 +83,39 @@ STEP_LOG_PATH = RUN_DIR / STEP_LOG_FILENAME
 TRAIN_LOG_PATH = RUN_DIR / TRAIN_LOG_FILENAME
 CONFIG_TEMPLATE_PATH = REPO_ROOT / "config_template.json"
 CONFIG_OVERRIDE_PATH = REPO_ROOT / "res" / "config.json"
+DATA_DIR = REPO_ROOT / "data"
+CHARACTER_BIGRAM_REFERENCE_PATHS = (
+    DATA_DIR / "chinese_frequency_word.json",
+    DATA_DIR / "chinese_name_frequency_word.json",
+)
 DEFAULT_REFERENCE_ACTIONS_PATH = "data/chapter_iterative_io_examples.txt"
 DEFAULT_REFERENCE_WARMUP_ROUNDS = 0
 DEFAULT_REFERENCE_WARMUP_STEPS = 5
+
+
+@lru_cache(maxsize=1)
+def _load_character_bigram_reference() -> set[str]:
+    pairs: set[str] = set()
+    for path in CHARACTER_BIGRAM_REFERENCE_PATHS:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue
+        except json.JSONDecodeError:
+            continue
+        if isinstance(raw, dict):
+            iterable = raw.keys()
+        elif isinstance(raw, list):
+            iterable = raw
+        else:
+            continue
+        for entry in iterable:
+            if not isinstance(entry, str):
+                continue
+            token = entry.strip()
+            if len(token) == 2 and not any(ch.isspace() for ch in token):
+                pairs.add(token)
+    return pairs
 
 STEP_CSV_HEADERS = [
     "round",
@@ -1961,15 +1992,7 @@ class ArticleEnvironment:
         self.reset()
 
     def _build_lexical_bigram_pairs(self) -> set[str]:
-        pairs: set[str] = set()
-        if self._lexical_statistics is None:
-            frequency = {}
-        else:
-            frequency = getattr(self._lexical_statistics, "corpus_frequency", {})
-        for token, count in frequency.items():
-            token_str = str(token)
-            if len(token_str) == 2 and not any(ch.isspace() for ch in token_str):
-                pairs.add(token_str)
+        pairs: set[str] = set(_load_character_bigram_reference())
         if self._lexical_tokenizer is not None and self._char_targets:
             text = "".join(self._char_targets)
             for token in self._lexical_tokenizer.tokenize(text):

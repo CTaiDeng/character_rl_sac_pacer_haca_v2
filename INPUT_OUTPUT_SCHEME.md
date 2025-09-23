@@ -57,7 +57,7 @@ function STEP(environment_state, policy):
     metrics = analyze_summary(action_text, source_text)
     base_reward = compute_base_reward(metrics, capital, budget, potential_before, potential_after, cost)
     soft_reward = compute_soft_reward(metrics)
-    if mode == "character" and source_text.length == 2 and source_text in lexical_bigram_set:
+    if mode == "character" and source_text.length == 2 and source_text in bigram_reference:
         base_reward += CHARACTER_LEXICAL_BIGRAM_BONUS
     reward = base_reward + soft_reward
     next_text = capital.render_text(budget)
@@ -65,12 +65,14 @@ function STEP(environment_state, policy):
     return Transition(observation, action, reward, next_observation, done)
 ```
 
+其中 `bigram_reference` 集合由上述两个词表提取的二字词并合并原文滑窗样本构成。
+
 ## 日志与缓存字段
 - 步级指标：`metrics` 中写入 `summary_length`、`similarity`、`coverage_ratio`、`lexical_cosine`、`lexical_js_similarity`、`garbled_ratio`、`word_noncompliance_ratio` 等字段并导出到 CSV。
 - 资本估值：`CapitalValuator.metrics` 输出 `capital_value`、`capital_coverage`、`capital_diversity`、`capital_redundancy`、`capital_verification_ratio`、`capital_fact_count`。
 - 预算记录：输出 `budget_remaining`、`budget_breach`、`operation_cost`、`cumulative_cost` 以便分析资源消耗。
 - 回放缓存：`SimpleReplayBuffer.add` 存储 `Transition(state, action, reward, next_state, done)`，供 `DemoSACAgent.update` 抽样。
-- 字符二元奖励：字符模式额外输出 `lexical_bigram_bonus`（匹配词频库或原文滑窗生成的二元组合时的奖励），便于监控拓扑记忆效果。
+- 字符二元奖励：字符模式额外输出 `lexical_bigram_bonus`（命中 `data/chinese_frequency_word.json` 或 `data/chinese_name_frequency_word.json` 的二字词，或来自原文滑窗时的奖励），便于监控拓扑记忆效果。
   常量 `CHARACTER_LEXICAL_BIGRAM_BONUS` 默认为 1.0，可通过代码调整以提高该拓扑记忆的权重。
 
 若调整观测格式、操作类型或估值指标，需要同步修改代码与本文档以保持一致。
