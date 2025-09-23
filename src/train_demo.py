@@ -2125,6 +2125,7 @@ class ArticleEnvironment:
 
         lexical_bigram_bonus = 0.0
         applied_lexical_bonus = 0.0
+        bigram_candidate = ""
         quality_signal = max(0.0, quality_component + lexical_component)
         soft_component = soft_reward
         base_component = base_reward
@@ -2134,8 +2135,21 @@ class ArticleEnvironment:
             potential_component += CHARACTER_POTENTIAL_QUALITY_WEIGHT * quality_signal
         reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
-            predicted_action_char = (canonical_summary[:1] if canonical_summary else (action.text[:1] if action.text else ""))
-            bigram_candidate = (target_char or "") + predicted_action_char
+            previous_char = state.previous_summary[-1:] if state.previous_summary else ""
+            if not previous_char and self._char_history:
+                previous_char = self._char_history[:1]
+            predicted_action_char = (
+                canonical_summary[:1]
+                if canonical_summary
+                else (action.text[:1] if action.text else "")
+            )
+            bigram_candidate = (
+                (previous_char + predicted_action_char)
+                if (previous_char and predicted_action_char)
+                else ""
+            )
+            if len(bigram_candidate) > 2:
+                bigram_candidate = bigram_candidate[-2:]
             match_char = bool(target_char and canonical_summary == target_char)
             if len(bigram_candidate) == 2:
                 if bigram_candidate in self._lexical_bigram_pairs:
@@ -2144,7 +2158,6 @@ class ArticleEnvironment:
                     lexical_bigram_bonus = CHARACTER_TEACHER_BIGRAM_FALLBACK
             applied_lexical_bonus = lexical_bigram_bonus if match_char else 0.0
             base_component += applied_lexical_bonus
-            reward = base_component + potential_component + soft_component
             reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
             predicted_char = canonical_summary[:1] if canonical_summary else ""
@@ -2190,6 +2203,7 @@ class ArticleEnvironment:
             "reward_potential_gain": float(potential_component),
             "reward_soft_bonus": float(soft_component),
             "lexical_bigram_bonus": float(applied_lexical_bonus if self._iteration_mode == "character" else lexical_bigram_bonus),
+            "lexical_bigram_candidate": bigram_candidate if self._iteration_mode == "character" else "",
             "reward": reward,
             "canonical_summary_text": canonical_summary,
             "summary_raw_length": float(len(action.text)),
@@ -3126,9 +3140,11 @@ class DemoTrainer(Trainer):
                 f"           | raw_action={raw_summary_len_str} chars \"{raw_summary_preview}\""
             )
             if character_mode:
-                target_component_raw = target_char or ""
-                predicted_component_raw = display_action_text or ""
-                combined_raw = target_component_raw + predicted_component_raw
+                combined_raw = str(metrics.get("lexical_bigram_candidate", ""))
+                if not combined_raw:
+                    target_component_raw = target_char or ""
+                    predicted_component_raw = display_action_text or ""
+                    combined_raw = target_component_raw + predicted_component_raw
                 bigram_length = len(combined_raw)
                 bigram_preview = combined_raw.replace("\n", "\\n").replace('"', '\"')
                 bigram_len_str = self._format_length(bigram_length, True)
