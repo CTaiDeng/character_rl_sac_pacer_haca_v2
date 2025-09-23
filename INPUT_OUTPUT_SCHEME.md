@@ -55,12 +55,11 @@ function STEP(environment_state, policy):
     budget = budget - cost
     potential_after = valuator.value(capital)
     metrics = analyze_summary(action_text, source_text)
+    base_reward = compute_base_reward(metrics, capital, budget, potential_before, potential_after, cost)
+    soft_reward = compute_soft_reward(metrics)
     if mode == "character" and source_text.length == 2 and source_text in lexical_bigram_set:
-        lexical_bonus = CHARACTER_LEXICAL_BIGRAM_BONUS
-    else:
-        lexical_bonus = 0
-    reward = compute_reward(metrics, capital, budget, potential_before, potential_after, cost)
-    reward += lexical_bonus
+        base_reward += CHARACTER_LEXICAL_BIGRAM_BONUS
+    reward = base_reward + soft_reward
     next_text = capital.render_text(budget)
     next_observation = TextObservation(next_text, chi_{t+1}, t+1)
     return Transition(observation, action, reward, next_observation, done)

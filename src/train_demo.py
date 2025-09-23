@@ -1784,6 +1784,48 @@ def _ensure_lexical_statistics(
     return _load_lexical_statistics(article_path)
 
 
+def _augment_lexical_statistics_with_bigrams(
+        stats: ChapterLexicalStatistics | None,
+        tokenizer: LexicalTokenizer | None,
+        chapters: Sequence[str],
+        *,
+        article_path: Path,
+) -> None:
+    if stats is None or tokenizer is None:
+        return
+    tokens = tokenizer.tokenize("".join(chapters))
+    if not tokens:
+        return
+    vocabulary = set(stats.vocabulary)
+    corpus_frequency = dict(stats.corpus_frequency)
+    document_frequency = dict(stats.document_frequency)
+    idf = dict(stats.idf)
+    total_documents = max(1, stats.total_documents)
+    updated = False
+    for token in tokens:
+        token = token.strip()
+        if len(token) != 2 or any(ch.isspace() for ch in token):
+            continue
+        vocabulary.add(token)
+        corpus_frequency[token] = corpus_frequency.get(token, 0) + 1
+        document_frequency[token] = max(1, document_frequency.get(token, 0))
+        if token not in idf:
+            df_value = document_frequency[token]
+            idf[token] = math.log((total_documents + 1) / (df_value + 1)) + 1
+        updated = True
+    if not updated:
+        return
+    stats.vocabulary = sorted(vocabulary)
+    stats.corpus_frequency = corpus_frequency
+    stats.document_frequency = document_frequency
+    stats.idf = idf
+    stats_path = article_path.parent / f"{article_path.stem}{LEXICAL_STATS_SUFFIX}"
+    try:
+        stats.save(stats_path)
+    except OSError:
+        pass
+
+
 def _run_inline_lexical_evaluation(
         lexical_stats: ChapterLexicalStatistics | None,
         lexical_tokenizer: LexicalTokenizer | None,
@@ -1924,16 +1966,16 @@ class ArticleEnvironment:
             frequency = {}
         else:
             frequency = getattr(self._lexical_statistics, "corpus_frequency", {})
-        for token in frequency:
+        for token, count in frequency.items():
             token_str = str(token)
             if len(token_str) == 2 and not any(ch.isspace() for ch in token_str):
                 pairs.add(token_str)
-        for chapter in self._chapters:
-            cleaned = "".join(ch for ch in chapter if not ch.isspace())
-            for idx in range(len(cleaned) - 1):
-                candidate = cleaned[idx:idx + 2]
-                if candidate:
-                    pairs.add(candidate)
+        if self._lexical_tokenizer is not None and self._char_targets:
+            text = "".join(self._char_targets)
+            for token in self._lexical_tokenizer.tokenize(text):
+                cleaned = token.strip()
+                if len(cleaned) == 2 and not any(ch.isspace() for ch in cleaned):
+                    pairs.add(cleaned)
         return pairs
 
     def reset(self) -> TextObservation:
@@ -2067,7 +2109,7 @@ class ArticleEnvironment:
                 lexical_bigram_bonus = CHARACTER_LEXICAL_BIGRAM_BONUS
             match_char = bool(target_char and canonical_summary == target_char)
             applied_lexical_bonus = lexical_bigram_bonus if match_char else 0.0
-            soft_component = soft_reward + applied_lexical_bonus
+            base_component += applied_lexical_bonus
             reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
             predicted_char = canonical_summary[:1] if canonical_summary else ""
@@ -3759,6 +3801,12 @@ def main() -> None:
     _console_log(
         "Loaded article debug info: "
         f"chars={total_length} preview=\"{preview}\""
+    )
+    _augment_lexical_statistics_with_bigrams(
+        lexical_stats,
+        lexical_tokenizer,
+        [ob.chapter_text for ob in observations],
+        article_path=article_path,
     )
     _console_log("Chapter statistics:")
     for observation in observations:

@@ -416,6 +416,7 @@ $\arg\max_\pi \mathbb{E}\sum_t \gamma^t r'_t=\arg\max_\pi \mathbb{E}\sum_t \gamm
 * **温度自适应**：维护 `log_alpha`（Adam 优化，学习率可配置），执行 $\log\alpha \leftarrow \log\alpha + \eta(H_{\text{tgt}}-H)$ 并限制 $\alpha\in[10^{-4},2]$；更新返回实时 `alpha` 供监控。
 * **奖励拆分展示**：日志中 `base/potential/soft` 通过 `_format_reward_component` 自动映射为“满分/负满分/数值”；在字符模式且代理输出与目标对齐时，三项同时显示“满分”。
 * **字符二元奖励**：`ArticleEnvironment.step` 在字符模式检测二元组是否存在于 `sample_article_lexical.json`，命中时追加 `CHARACTER_LEXICAL_BIGRAM_BONUS=1.0`，并在日志中记录 `lexical_bigram_bonus`。
+* **词频补全**：启动时调用  `_augment_lexical_statistics_with_bigrams` 对词频缓存进行补全，确保原文中出现的二字词至少以频次 1 写回。 
 * **日志宽度参数**： `character_length_field_width` 控制字符模式日志长度字段，默认 1，可在配置中调节。 
 * **日志宽度参数**：`character_length_field_width` 控制字符模式日志的长度字段，默认 1，可通过配置调整补零宽度。
 * **Trainer 日志同步**：字符模式下 `DemoTrainer.run` 使用轮次教师对进行日志与教师干预，保证代理观测与回放的一致性。
