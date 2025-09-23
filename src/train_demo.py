@@ -2135,14 +2135,21 @@ class ArticleEnvironment:
             potential_component += CHARACTER_POTENTIAL_QUALITY_WEIGHT * quality_signal
         reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
-            previous_char = state.previous_summary[-1:] if state.previous_summary else ""
-            if not previous_char and self._char_history:
-                previous_char = self._char_history[:1]
+            truth_pair = ""
+            if self._char_truth_pairs and self._cursor < len(self._char_truth_pairs):
+                truth_pair = self._char_truth_pairs[self._cursor]
+            truth_prev_char = truth_pair[:1]
+            truth_expected_char = truth_pair[-1:]
             predicted_action_char = (
                 canonical_summary[:1]
                 if canonical_summary
                 else (action.text[:1] if action.text else "")
             )
+            previous_char = truth_prev_char
+            if not previous_char:
+                previous_char = state.previous_summary[-1:] if state.previous_summary else ""
+            if not previous_char and self._char_history:
+                previous_char = self._char_history[:1]
             bigram_candidate = (
                 (previous_char + predicted_action_char)
                 if (previous_char and predicted_action_char)
@@ -2150,7 +2157,7 @@ class ArticleEnvironment:
             )
             if len(bigram_candidate) > 2:
                 bigram_candidate = bigram_candidate[-2:]
-            match_char = bool(target_char and canonical_summary == target_char)
+            match_char = bool(truth_expected_char and predicted_action_char == truth_expected_char)
             if len(bigram_candidate) == 2:
                 if bigram_candidate in self._lexical_bigram_pairs:
                     lexical_bigram_bonus = CHARACTER_LEXICAL_BIGRAM_BONUS
