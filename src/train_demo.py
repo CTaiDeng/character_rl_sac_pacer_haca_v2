@@ -2134,7 +2134,7 @@ class ArticleEnvironment:
             potential_component += CHARACTER_POTENTIAL_QUALITY_WEIGHT * quality_signal
         reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
-            predicted_action_char = (display_action_text or "")[:1]
+            predicted_action_char = (canonical_summary[:1] if canonical_summary else (action.text[:1] if action.text else ""))
             bigram_candidate = (target_char or "") + predicted_action_char
             match_char = bool(target_char and canonical_summary == target_char)
             if len(bigram_candidate) == 2:
