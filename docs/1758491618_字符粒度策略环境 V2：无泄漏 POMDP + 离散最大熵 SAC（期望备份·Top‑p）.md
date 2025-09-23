@@ -111,7 +111,7 @@ $$
 \mathrm{bonus}_t = \lambda_{\text{bigram}} \cdot \mathbf{1}[b_t \in \mathcal{L}], \qquad \lambda_{\text{bigram}} = 1.0,
 \]
 
-其中 $\mathcal{L}$ 为上述两个词表的并集（过滤为二字词），必要时可合并原文滑窗补充样本。该奖励直接累加到字符模式的 `soft` 组件，促使策略优先记忆原文的非交换邻接字符组合。
+其中 $\mathcal{L}$ 为上述两个词表的并集（过滤为二字词），必要时可合并原文滑窗补充样本。该奖励直接累加到字符模式的 `soft` 组件，促使策略优先记忆原文的非交换邻接字符组合。 同时，将质量信号按照 $0.5/0.25$ 的权重注入基础与潜在分数，使高质量字符动作在硬指标上得到体现。
 
 **(4) 洁净/非法罚**
 
@@ -415,7 +415,7 @@ $\arg\max_\pi \mathbb{E}\sum_t \gamma^t r'_t=\arg\max_\pi \mathbb{E}\sum_t \gamm
 * **Top‑p 期望**：`DemoSACAgent.update` 的 `_select_top_p`/`_evaluate_q_candidates` 组合在目标和策略两侧均采用截断重归一的概率，保持 $(1-done)$ 截断和 Twin-Q 最小化。
 * **温度自适应**：维护 `log_alpha`（Adam 优化，学习率可配置），执行 $\log\alpha \leftarrow \log\alpha + \eta(H_{\text{tgt}}-H)$ 并限制 $\alpha\in[10^{-4},2]$；更新返回实时 `alpha` 供监控。
 * **奖励拆分展示**：日志中 `base/potential/soft` 通过 `_format_reward_component` 自动映射为“满分/负满分/数值”；在字符模式且代理输出与目标对齐时，三项同时显示“满分”。
-* **字符二元奖励**：`ArticleEnvironment.step` 在字符模式检测二元组是否存在于 `data/chinese_frequency_word.json` 或 `data/chinese_name_frequency_word.json`，命中时追加 `CHARACTER_LEXICAL_BIGRAM_BONUS=1.0`，并在日志中记录 `lexical_bigram_bonus`。
+* **字符二元奖励**：`ArticleEnvironment.step` 在字符模式检测二元组是否存在于 `data/chinese_frequency_word.json` 或 `data/chinese_name_frequency_word.json`，命中时追加 `CHARACTER_LEXICAL_BIGRAM_BONUS=1.0`；若未命中但与教师目标一致，则给予 `0.5` 的回退奖励，并在日志中记录 `lexical_bigram_bonus`。
 * **词频补全**：启动时调用  `_augment_lexical_statistics_with_bigrams` 对词频缓存进行补全，确保原文中出现的二字词至少以频次 1 写回。 
 * **日志宽度参数**： `character_length_field_width` 控制字符模式日志长度字段，默认 1，可在配置中调节。 
 * **日志宽度参数**：`character_length_field_width` 控制字符模式日志的长度字段，默认 1，可通过配置调整补零宽度。

@@ -334,6 +334,9 @@ COMPLIANCE_MASK_FILL_VALUE = -1e9
 ALPHA_MIN = 1e-4
 ALPHA_MAX = 2.0
 CHARACTER_LEXICAL_BIGRAM_BONUS = 1.0
+CHARACTER_BASE_QUALITY_WEIGHT = 0.5
+CHARACTER_POTENTIAL_QUALITY_WEIGHT = 0.25
+CHARACTER_TEACHER_BIGRAM_FALLBACK = 0.5
 OPERATION_COSTS: Mapping[str, float] = {
     'ACQUIRE': 3.0,
     'EXTRACT': 3.0,
@@ -2122,15 +2125,22 @@ class ArticleEnvironment:
 
         lexical_bigram_bonus = 0.0
         applied_lexical_bonus = 0.0
+        quality_signal = max(0.0, quality_component + lexical_component)
         soft_component = soft_reward
         base_component = base_reward
         potential_component = potential_gain
+        if self._iteration_mode == "character":
+            base_component += CHARACTER_BASE_QUALITY_WEIGHT * quality_signal
+            potential_component += CHARACTER_POTENTIAL_QUALITY_WEIGHT * quality_signal
         reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
             bigram_candidate = source_text if len(source_text) == 2 else ""
-            if bigram_candidate and bigram_candidate in self._lexical_bigram_pairs:
-                lexical_bigram_bonus = CHARACTER_LEXICAL_BIGRAM_BONUS
             match_char = bool(target_char and canonical_summary == target_char)
+            if bigram_candidate:
+                if bigram_candidate in self._lexical_bigram_pairs:
+                    lexical_bigram_bonus = CHARACTER_LEXICAL_BIGRAM_BONUS
+                elif match_char:
+                    lexical_bigram_bonus = CHARACTER_TEACHER_BIGRAM_FALLBACK
             applied_lexical_bonus = lexical_bigram_bonus if match_char else 0.0
             base_component += applied_lexical_bonus
             reward = base_component + potential_component + soft_component
@@ -3113,6 +3123,16 @@ class DemoTrainer(Trainer):
             stanza_lines.append(
                 f"           | raw_action={raw_summary_len_str} chars \"{raw_summary_preview}\""
             )
+            if character_mode:
+                target_component_raw = target_char or ""
+                predicted_component_raw = display_action_text or ""
+                combined_raw = target_component_raw + predicted_component_raw
+                bigram_length = len(combined_raw)
+                bigram_preview = combined_raw.replace("\n", "\\n").replace('"', '\"')
+                bigram_len_str = self._format_length(bigram_length, True)
+                stanza_lines.append(
+                    f'           | bigram={bigram_len_str} chars "{bigram_preview}"'
+                )
             total_reward += transition.reward
             summary_length_value = float(metrics.get("summary_length", summary_len))
             log_metrics: MutableMapping[str, Any] = {
@@ -3221,7 +3241,7 @@ class DemoTrainer(Trainer):
             log_lines = base_lines + metric_lines + [penalty_line]
             _append_step_log(log_lines + [reward_line], block_color)
             if character_mode:
-                for stored_line in base_lines:
+                for stored_line in log_lines:
                     _console_log(stored_line, color=block_color)
                 _console_log("", color=block_color)
             else:
