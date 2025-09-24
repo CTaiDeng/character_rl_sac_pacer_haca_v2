@@ -54,9 +54,16 @@
 
 ## 观测与动作拼接规则
 - 文本模式：`[<bos>] + summary + [<sep>] + chapter + [<eos>]`。
-- 字符模式：`[<bos>] + summary + [<eos>]`，并额外记录 `target_char` 作比较。
+- 字符模式：`[<bos>] + summary + [<eos>]`，并额外记录 `target_char`（当前章节字符）。
 - Token 化时保留 `<pad>/<bos>/<eos>/<sep>/<unk>`，长度超限时截断到 `max_observation_length`。
 - 策略首 token 由 `first_step_distribution` 采样，后续 token 使用 Top-$p$ ($p=0.98$) 过滤与合规掩码。
+
+## 字符模式 bigram 定义（更新）
+- 候选计算：`bigram = chapter_char ⊕ raw_action_char`。
+- raw_action_char 提取：
+  - 教师动作（常见为 `chapter_char + next_char`）：若 `action.text` 以 `chapter_char` 开头且长度≥2，则取 `action.text` 的末字；
+  - 其他情况：取 `action.text` 的首字。
+- 记录位置：`metrics['lexical_bigram_candidate']` 记录该 bigram；命中词表时 `lexical_bigram_bonus` 取 `CHARACTER_LEXICAL_BIGRAM_BONUS`，否则在 `match_char` 时回退 `CHARACTER_TEACHER_BIGRAM_FALLBACK`。
 
 ## 输入输出伪代码
 ```pseudo
@@ -83,6 +90,15 @@ function ENV_STEP(state, policy, replay_buffer):
         state.capital, state.budget, operations, analyze_summary(action_text), state.done
     )
 
+    # 字符模式 bigram：chapter + raw_action
+    if mode == "character":
+        chapter_char = target_char
+        if startswith(action_text, chapter_char) and length(action_text) >= 2:
+            raw_action_char = last(action_text)
+        else:
+            raw_action_char = first(action_text)
+        bigram = chapter_char ++ raw_action_char
+
     next_observation = TextObservation(
         render_text(capital_after, budget_after),
         next_chapter(state.mode, state.index),
@@ -97,7 +113,7 @@ function ENV_STEP(state, policy, replay_buffer):
 - `metrics`: 记录 `similarity`、`coverage_ratio`、`novelty_ratio`、`lexical_cosine`、`lexical_js_similarity`、`garbled_ratio`、`word_noncompliance_ratio`，写入 `out/metrics_logs/*.csv`。
 - `capital_metrics`: 由 `CapitalValuator.metrics` 产生，含 `capital_value`、`topic_coverage`、`fact_count` 等字段，用于调试面板。
 - 预算轨迹：`budget_remaining`、`budget_breach`、`operation_cost`、`cumulative_cost` 持久化于 episode summary。
-- 字符模式额外日志：`predicted_char`、`target_char`、`lexical_bigram_bonus`，用于细粒度对齐分析。
+- 字符模式额外日志：`predicted_char`、`target_char`、`lexical_bigram_bonus`、`lexical_bigram_candidate`（按上节定义）。
 
 ## 一致性约束
 - 若 `CharTokenizer` 的特殊标记或 `max_observation_length` 调整，需同步更新观测拼接公式。

@@ -2221,25 +2221,30 @@ class ArticleEnvironment:
             potential_component += CHARACTER_POTENTIAL_QUALITY_WEIGHT * quality_signal
         reward = base_component + potential_component + soft_component
         if self._iteration_mode == "character":
+            # Truth pair represents (prev_char + expected_char) for this step
             truth_pair = ""
             if self._char_truth_pairs and self._cursor < len(self._char_truth_pairs):
                 truth_pair = self._char_truth_pairs[self._cursor]
             truth_prev_char = truth_pair[:1]
             truth_expected_char = truth_pair[-1:]
+            # Predicted first char used for metrics
             predicted_action_char = (
                 canonical_summary[:1]
                 if canonical_summary
                 else (action.text[:1] if action.text else "")
             )
-            previous_char = truth_prev_char
-            if not previous_char:
-                previous_char = state.previous_summary[-1:] if state.previous_summary else ""
-            if not previous_char and self._char_history:
-                previous_char = self._char_history[:1]
+            # Determine raw_action_char for bigram = chapter(target_char) + raw_action_char
+            raw_action_char = ""
+            if action.text:
+                # If action is teacher-provided "target + next", prefer the second char
+                if target_char and action.text.startswith(target_char) and len(action.text) >= 2:
+                    raw_action_char = action.text[-1]
+                else:
+                    raw_action_char = action.text[:1]
+            # Current chapter target character
+            chapter_char = target_char or ""
             bigram_candidate = (
-                (previous_char + predicted_action_char)
-                if (previous_char and predicted_action_char)
-                else ""
+                (chapter_char + raw_action_char) if (chapter_char and raw_action_char) else ""
             )
             if len(bigram_candidate) > 2:
                 bigram_candidate = bigram_candidate[-2:]

@@ -93,6 +93,6 @@ function POLICY_FORWARD(tokens, lengths):
 ## 子模块关系概览
 - Tokenizer (`CharTokenizer`) 向策略提供索引，策略输出经 `OperationParser` 转化为结构化动作。
 - `TextPolicyNetwork`、`TextQNetwork`、`ValueTargetNetwork` 共享嵌入矩阵，减少参数漂移。
-- 字符模式下额外分支 `CharacterPolicyHead` 复用相同编码器，但输出 2-token 的 bigram logits，并与主策略共享熵参数。
+- 字符模式 bigram（更新）：使用 `chapter_char + raw_action_char` 组装；若 `action.text` 以 `chapter_char` 开头且长度≥2，`raw_action_char = last(action.text)`，否则取首字。
 
 若网络结构、超参或采样策略调整，请同步更新本文件与相关实现。
