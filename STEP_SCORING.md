@@ -1,99 +1,124 @@
-# 当前 Step 打分方案说明
+# 当前 Step 打分方案
 
-## 数学定义
-记第 $t$ 步执行前的认知资本为 $C_{t-1}$，执行后为 $C_t$，执行后预算为 $B_t^{\text{raw}}$。解析得到的操作集合记为 $\mathcal{O}_t$，其元素 $o$ 的类别为 $\mathrm{kind}(o)$。
+## 符号约定
+- $C_t = (F_t, V_t, H_t)$：第 $t$ 步结束后的认知资本，依次表示事实集、验证证据集、对冲假设集。
+- $B_t$：第 $t$ 步完成后的剩余预算；$B_0 = \texttt{DEFAULT\_INITIAL\_BUDGET}$。
+- $\mathcal{O}_t = \{o_1, \dots, o_{n_t}\}$：当前步的操作序列，$\mathrm{kind}(o)$ 和 $\mathrm{payload}(o)$ 分别为操作类型与参数。
+- $\mathrm{metrics}_t$：评估模块返回的指标字典，含 `similarity`、`coverage_ratio`、`novelty_ratio`、`lexical_cosine`、`lexical_js_similarity`、`garbled_ratio`、`word_noncompliance_ratio` 等键。
 
-1. **操作成本**：
-   \[
-   c_t = \sum_{o \in \mathcal{O}_t} \mathrm{cost}\bigl(\mathrm{kind}(o)\bigr),\qquad
-   \mathrm{cost}(k) = \begin{cases}
-   \texttt{OPERATION\_COSTS}[k], & k \in \{\text{ACQUIRE},\text{EXTRACT},\text{LINK},\text{VERIFY},\text{HEDGE},\text{TRIM},\text{COMMIT}\} \\
-   \texttt{DEFAULT\_OPERATION\_COST}, & \text{否则}
-   \end{cases}
-   \]
-   非终止步骤的成本惩罚仅使用 $c_t$；终止步骤改用累计成本 $\bar{c}_t = \sum_{i=1}^t c_i$。
+## 核心评价公式
 
-2. **资本估值**：认知资本 $C_t = (F_t,V_t,H_t)$ 包含事实、核实与对冲集合。
-   \[
-   V(C_t) = \max\Bigl(\bigl(w_c\,\kappa_t + w_d\,\delta_t - w_r\,\rho_t + w_v\,\nu_t + w_f\,\ln(1+|F_t|)\bigr) (1-0.2\,\eta_t),\;0\Bigr).
-   \]
-   其中：
-   - 覆盖率 $\kappa_t = \dfrac{|\bigcup_{f\in F_t} T(f)|}{|\bigcup_{p\in\mathcal{P}} T(p)|}$，$T(\cdot)$ 为分词集合；
-   - 多样性 $\delta_t = \dfrac{|\{\text{类别}(f):f\in F_t\}|}{|\text{类别宇集}|}$；
-   - 冗余度 $\rho_t$ 为事实两两 Jaccard 均值；
-   - 验证占比 $\nu_t = \dfrac{|V_t|}{\max(1, |F_t|)}$；
-   - 对冲占比 $\eta_t = \dfrac{|H_t|}{\max(1, |F_t|+|H_t|)}$；
-   - 权重 $w_c=1.5,\; w_d=0.8,\; w_r=0.6,\; w_v=0.4,\; w_f=0.45$。
+### 1. 操作成本
+\[
+ c_t = \sum_{o \in \mathcal{O}_t} \mathrm{cost}(\mathrm{kind}(o)),\qquad
+ \bar{c}_t = \sum_{i=1}^{t} c_i
+\]
+其中
+\[
+ \mathrm{cost}(k) =
+ \begin{cases}
+  \texttt{OPERATION\_COSTS}[k], & k \in \{\text{ACQUIRE}, \text{EXTRACT}, \text{LINK}, \text{VERIFY}, \text{HEDGE}, \text{TRIM}, \text{COMMIT}\} \\
+  \texttt{DEFAULT\_OPERATION\_COST}, & \text{其它类型}
+ \end{cases}
+\]
 
-3. **基础奖励**：
-   \[
-   B_t = V(C_t) - \lambda_t - \beta\,\max\bigl(0, -B_t^{\text{raw}}\bigr)。
-   \]
-   其中 $\beta = \texttt{BUDGET\_PENALTY\_WEIGHT}=0.02$，成本惩罚 $\lambda_t$ 为：
-   \[
-   \lambda_t = \texttt{COST\_WEIGHT} \times\begin{cases}
-   \bar{c}_t, & t \text{ 为终止步} \\
-   c_t, & \text{否则}
-   \end{cases},\qquad \texttt{COST\_WEIGHT}=0.08。
-   \]
+### 2. 资本价值函数
+定义覆盖率、深度、多样性、冗余、验证度与对冲占比：
+\[
+\begin{aligned}
+ \kappa_t &= \frac{\bigl|\bigcup_{f \in F_t} T(f)\bigr|}{\bigl|\bigcup_{p \in \mathcal{P}} T(p)\bigr|}, &
+ \delta_t &= \frac{\bigl|\{\mathrm{domain}(f) : f \in F_t\}\bigr|}{|\mathcal{D}|},\\
+ \rho_t &= \mathrm{Jaccard}(F_t, F_{t-1}), &
+ \nu_t &= \frac{|V_t|}{\max(1, |F_t|)},\\
+ \eta_t &= \frac{|H_t|}{\max(1, |F_t| + |H_t|)}.
+\end{aligned}
+\]
+资本价值定义为
+\[
+ V(C_t) = \sigma\Bigl(w_c\kappa_t + w_d \delta_t + w_v \nu_t - w_r \rho_t - w_h \eta_t + w_f \ln(1 + |F_t|)\Bigr),
+\]
+其中 $\sigma(x) = \dfrac{1}{1 + e^{-x}}$。潜力增量记为 $\Delta\Phi_t = V(C_t) - V(C_{t-1})$。
 
-4. **潜能塑形**：潜能函数与估值一致 $\Phi(C)=V(C)$，塑形项 $\Delta\Phi_t = V(C_t) - V(C_{t-1})$。
+### 3. 预算约束与罚项
+\[
+ B_t = B_{t-1} - c_t,\qquad
+ \lambda_t = \gamma_c\, c_t + \gamma_{\text{cum}}\, \bar{c}_t,\qquad
+ \psi_t = \beta \max(0, -B_t).
+\]
 
-5. **软奖励**：记质量指标 $(\mathrm{sim}_t,\mathrm{cov}_t,\mathrm{nov}_t)$，词汇指标 $(\mathrm{cos}_t,\mathrm{js}_t)$，洁净指标 $(\mathrm{garble}_t,\mathrm{noncomp}_t)$。
-   \[
-   \begin{aligned}
-   S_t &= Q_t + L_t - P_t, \\
-   Q_t &= w_s\,\mathcal{N}_{4.0}(\mathrm{sim}_t) + w_{cov}\,\mathcal{N}_{4.0}(\mathrm{cov}_t) + w_{nov}\,\mathcal{N}_{4.0}(\mathrm{nov}_t), \\
-   L_t &= w_{lex}\,\mathcal{N}_{3.5}(\mathrm{cos}_t) + w_{js}\,\mathcal{N}_{3.5}(\mathrm{js}_t), \\
-   P_t &= w_{gar}\,\mathcal{N}_{5.0}(\mathrm{garble}_t) + w_{word}\,\mathcal{N}_{5.0}(\mathrm{noncomp}_t)。
-   \end{aligned}
-   \]
-   其中 $\mathcal{N}_\gamma(x) = 1 - (1-x)^{\gamma}$，权重满足 $w_s=0.6,\; w_{cov}=0.3,\; w_{nov}=0.1,\; w_{lex}=0.15,\; w_{js}=0.1,\; w_{gar}=0.5,\; w_{word}=0.7$。
+### 4. 软指标
+引入非线性映射 $\mathcal{N}_\gamma(x) = 1 - (1-x)^{\gamma}$：
+\[
+\begin{aligned}
+ Q_t &= w_s\, \mathcal{N}_{4.0}(\mathrm{metrics}_t[\texttt{similarity}]) + w_{cov}\, \mathcal{N}_{4.0}(\mathrm{metrics}_t[\texttt{coverage\_ratio}]) + w_{nov}\, \mathcal{N}_{4.5}(\max(0, \mathrm{metrics}_t[\texttt{novelty\_ratio}]))\\
+ L_t &= w_{lex}\, \mathcal{N}_{3.5}(\mathrm{metrics}_t[\texttt{lexical\_cosine}]) + w_{js}\, \mathcal{N}_{3.0}(\mathrm{metrics}_t[\texttt{lexical\_js\_similarity}])\\
+ P_t &= w_{gar}\, \mathcal{N}_{5.0}(\mathrm{metrics}_t[\texttt{garbled\_ratio}]) + w_{word}\, \mathcal{N}_{5.0}(\mathrm{metrics}_t[\texttt{word\_noncompliance\_ratio}])
+\end{aligned}
+\]
 
-6. **总奖励**：
-   \[
-   R_t = B_t + \Delta\Phi_t + S_t。
-   \]
+### 5. Step 总得分
+\[
+ R_t = \alpha_{\text{base}} V(C_t) + \Delta\Phi_t + Q_t + L_t - P_t - \lambda_t - \psi_t.
+\]
 
-## 伪代码
+## 参数取值
+| 符号 | 数值 | 说明 |
+| --- | --- | --- |
+| $\texttt{OPERATION\_COSTS}$ | `{ACQUIRE:3, EXTRACT:3, LINK:2, VERIFY:4, HEDGE:1.5, TRIM:1, COMMIT:5}` | 见 `src/train_demo.py` 中的 `OPERATION_COSTS` |
+| $\texttt{DEFAULT\_OPERATION\_COST}$ | $2$ | 未列出的操作默认成本 |
+| $w_c, w_d, w_v, w_r, w_h, w_f$ | $1.6, 0.9, 0.5, 0.6, 0.3, 0.45$ | 资本价值权重 |
+| $\gamma_c, \gamma_{\text{cum}}$ | $0.08, 0.02$ | 成本罚项系数 |
+| $\beta$ | $0.02$ | 预算穿透罚项系数 |
+| $w_s, w_{cov}, w_{nov}$ | $0.6, 0.25, 0.15$ | 语义质量权重 |
+| $w_{lex}, w_{js}$ | $0.18, 0.12$ | 词法质量权重 |
+| $w_{gar}, w_{word}$ | $0.5, 0.7$ | 清洁度惩罚权重 |
+| $\alpha_{\text{base}}$ | $0.6$ | 基础资本权重 |
+
+## α 伪代码
 ```pseudo
-function STEP_SCORE(state_capital, budget_prev, operations, metrics, is_terminal):
-    cost = sum(OPERATION_COSTS.get(op.kind, DEFAULT_OPERATION_COST) for op in operations)
-    budget_raw = budget_prev - cost
-    capital = apply_operations(state_capital, operations)
-    potential_before = value(state_capital)
-    potential_after = value(capital)
+function STEP_SCORE(prev_capital, prev_budget, operations, metrics, is_terminal):
+    cost = sum(cost_of(op.kind) for op in operations)
+    cumulative_cost = update_cumulative(cost, is_terminal)
+    budget = prev_budget - cost
 
-    step_cost = cumulative_cost + cost if is_terminal else cost
-    if is_terminal:
-        step_cost = cumulative_cost
-    cost_penalty = COST_WEIGHT * step_cost
-    budget_breach = max(0.0, -budget_raw)
-    base_reward = value(capital) - cost_penalty - BUDGET_PENALTY_WEIGHT * budget_breach
+    capital = apply_operations(prev_capital, operations)
+    value_prev = capital_value(prev_capital)
+    value_new = capital_value(capital)
+    potential_gain = value_new - value_prev
+
+    lambda_penalty = GAMMA_C * cost + GAMMA_CUM * cumulative_cost
+    budget_penalty = BETA * max(0.0, -budget)
 
     quality = (
-        QUALITY_SIMILARITY_WEIGHT * nonlinear(metrics['similarity'], QUALITY_NONLINEAR_EXPONENT)
-        + QUALITY_COVERAGE_WEIGHT * nonlinear(metrics['coverage_ratio'], QUALITY_NONLINEAR_EXPONENT)
-        + QUALITY_NOVELTY_WEIGHT * nonlinear(max(0.0, metrics['novelty_ratio']), QUALITY_NONLINEAR_EXPONENT)
+        W_S * nonlinear(metrics["similarity"], 4.0)
+        + W_COV * nonlinear(metrics["coverage_ratio"], 4.0)
+        + W_NOV * nonlinear(max(0.0, metrics["novelty_ratio"]), 4.5)
     )
     lexical = (
-        LEXICAL_SIMILARITY_WEIGHT * nonlinear(metrics['lexical_cosine'], LEXICAL_NONLINEAR_EXPONENT)
-        + LEXICAL_JS_WEIGHT * nonlinear(metrics['lexical_js_similarity'], LEXICAL_NONLINEAR_EXPONENT)
+        W_LEX * nonlinear(metrics["lexical_cosine"], 3.5)
+        + W_JS * nonlinear(metrics["lexical_js_similarity"], 3.0)
     )
     penalty = (
-        GARBLED_REWARD_WEIGHT * nonlinear(metrics['garbled_ratio'], CLEANLINESS_NONLINEAR_EXPONENT)
-        + WORD_COMPLIANCE_REWARD_WEIGHT * nonlinear(metrics['word_noncompliance_ratio'], CLEANLINESS_NONLINEAR_EXPONENT)
+        W_GAR * nonlinear(metrics["garbled_ratio"], 5.0)
+        + W_WORD * nonlinear(metrics["word_noncompliance_ratio"], 5.0)
     )
-    soft_reward = quality + lexical - penalty
 
-    reward = base_reward + (potential_after - potential_before) + soft_reward
-    return reward, capital, budget_raw
+    reward = (
+        ALPHA_BASE * value_new
+        + potential_gain
+        + quality + lexical - penalty
+        - lambda_penalty - budget_penalty
+    )
+
+    if is_terminal:
+        reward += terminal_adjustment(capital)
+
+    return reward, capital, budget
 ```
 
-## 参数表
-- `OPERATION_COSTS = {ACQUIRE: 3, EXTRACT: 3, LINK: 2, VERIFY: 4, HEDGE: 1.5, TRIM: 1, COMMIT: 5}`，`DEFAULT_OPERATION_COST = 2`。
-- 初始预算 `DEFAULT_INITIAL_BUDGET = 1200`，透支惩罚系数 `BUDGET_PENALTY_WEIGHT = 0.02`。
-- 非线性放大函数 `nonlinear(x, \gamma) = 1 - (1-x)^{\gamma}` 在实现中对应 `_nonlinear_reward`。
-- 所有指标的计算与记录位于 `src/train_demo.py` 的 `ArticleEnvironment.step` 与 `CapitalValuator` 中。
+## 实现映射
+- 认知资本、潜力与价值评估在 `src/train_demo.py` 的 `CognitiveCapital` 与 `CapitalValuator` 中实现。
+- 操作成本与预算更新位于 `ArticleEnvironment.step` 的 `_apply_operations` 链路。
+- 软指标由 `SummarizationMetrics` 计算，位于 `src/train_demo.py` 的 `analyze_summary` 函数附近。
 
-若调整任何权重、成本或函数形式，需同步修改实现与本文档以保持一致。
+如在代码层调整参数或函数，请同步更新本文档。
