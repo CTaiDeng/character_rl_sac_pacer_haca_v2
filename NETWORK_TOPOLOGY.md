@@ -1,98 +1,91 @@
-# 当前网络拓扑结构设计
+# 当前网络拓扑结构方案
 
 ## 策略网络 $\pi_\theta$
-- 输入：token 序列 $x_t \in \mathbb{N}^{L_t}$，先经词嵌入矩阵 $E \in \mathbb{R}^{|V| \times d}$ 得到 $X_t = E x_t$。
-- 编码器：双层 GRU，隐藏维度 $h=128$，得到上下文表示 $h^{\text{enc}} = \mathrm{GRU}_{\text{enc}}(X_t)$。
-- 解码器：条件 GRU，以 $h^{\text{enc}}$ 为初始状态，逐步生成 $y_t$，每步 logits
-  \[
-  z_\tau = W_o h_\tau + b_o,\qquad W_o \in \mathbb{R}^{|V| \times h}
-  \]
-- 合规掩码：`WordComplianceChecker` 根据前缀 $y_{<\tau}$ 构造可选集合 $\mathcal{A}(y_{<\tau})$，对非法 token 赋值 $-10^9$，温度缩放 $\tau_c = 0.85$。
-- 采样：
-  \[
-  p_\theta(y_\tau \mid y_{<\tau}, x_t) = \mathrm{Softmax}(z_\tau / \tau_c)\big|_{\mathcal{A}(y_{<\tau})}
-  \]
-  训练阶段采用 Gumbel-Softmax 近似，推理阶段使用 Top-$p$ ($p=0.98$) 抽样。
+- 结构：`TextPolicyNetwork` (`src/train_demo.py:2371-2525`) 使用共享字符词表。
+  1. 嵌入层 $E \in \mathbb{R}^{|V|\times d_{\text{emb}}}$ 将 tokens 映射为向量。
+  2. 编码 GRU（单向，hidden dim $d_h$）对输入序列执行 `pack_padded_sequence` 编码，得到上下文隐状态 $h^{\text{enc}}$。
+  3. 解码 GRU 以 $h^{\text{enc}}$ 为初始状态自回归地产生输出 token，步进时应用合规模块 `_mask_logits`。
+  4. 输出层 $W_o \in \mathbb{R}^{|V|\times d_h}$，logits 经温度缩放 $\tau_c = \texttt{DEFAULT\_COMPLIANCE\_TEMPERATURE} = 0.85$ 与合规掩码处理。
+- 合规模块：给定前一 token $y_{t,\tau-1}$、`summary_token_ids` 与 `WordComplianceChecker` (`src/train_demo.py:230-381`)，构造允许集合 $\mathcal{A}(y_{<\tau})$，对非法 token 赋值 $\texttt{COMPLIANCE\_MASK\_FILL\_VALUE}=-10^9$。
+- 采样：`DemoSACAgent._select_top_p` (`src/train_demo.py:2709-2763`) 对 softmax 概率执行 Top-$p$ 过滤，$p$ 来自配置（默认 0.98），并返回候选集合、归一化权重和 log-prob。
+- 确定性推理：`TextPolicyNetwork.deterministic` 使用贪心选取允许集合中概率最大的 token。
 
-## 值函数 $Q_\phi, Q_\psi$
-- 输入：状态 token $x_t$ 与动作 token $y_t$。
-- 状态嵌入：
+## 价值网络 $Q_\phi, Q_\psi$
+- 结构：`TextQNetwork` (`src/train_demo.py:2572-2623`) 对状态与动作序列分别嵌入，使用掩码均值：
   \[
-  u = \tanh\bigl(W_s\, \mathrm{mean\_pool}(E x_t) + b_s\bigr)
+  u = \tanh(W_s \cdot \mathrm{mean\_mask}(E x_t)),\quad
+  v = \tanh(W_a \cdot \mathrm{mean\_mask}(E y_t)).
   \]
-- 动作嵌入：
-  \[
-  v = \tanh\bigl(W_a\, \mathrm{mean\_pool}(E y_t) + b_a\bigr)
-  \]
-- 拼接后通过两层 MLP 得到 $Q_\phi(s, a)$；$Q_\psi$ 结构一致，参数独立。
-- 目标网络使用指数滑动：
-  \[
-  \theta' \leftarrow \tau \theta + (1-\tau)\theta',\qquad \phi', \psi' \text{ 同理}
-  \]
+- 将 $u \Vert v$ 拼接后经两层 MLP（ReLU-Linear-ReLU-Linear）输出标量值。
+- 工厂类 `DemoNetworkFactory` (`src/train_demo.py:2625-2669`) 生成成对的 $Q$ 网络和策略网络，确保参数共享词表与超参数。
 
-## 熵系数与损失
-- 目标熵：
+## SAC 损失构造
+`DemoSACAgent.update` (`src/train_demo.py:2784-2897`) 实现软演员-评论家：
+- 目标值：
   \[
-  H_{\text{tgt}} = \kappa \log |\mathcal{A}(x_t)|,\qquad \kappa = 0.9
+  y = r + \gamma (1 - d) \cdot \mathbb{E}_{a'\sim\pi}\bigl[\min(Q_{\phi'}(s', a'), Q_{\psi'}(s', a')) - \alpha \log \pi(a'\mid s')\bigr].
   \]
-- 自适应熵系数 $\alpha$ 更新：
-  \[
-  \mathcal{L}_{\alpha} = -\alpha \cdot (\log \pi_\theta(y_t \mid x_t) + H_{\text{tgt}})
-  \]
+  期望通过 Top-$p$ 候选集、权重 $w_i$ 与 log-prob $\log p_i$ 近似：
+  $\sum_i w_i (\min(Q_{\phi'},Q_{\psi'}) - \alpha \log p_i)$。
+- 评论家损失：$\mathcal{L}_{Q} = \mathrm{MSE}(Q_\phi(s,a), y) + \mathrm{MSE}(Q_\psi(s,a), y)$。
 - 策略损失：
   \[
-  \mathcal{L}_{\pi} = \mathbb{E}_{(s,a) \sim \mathcal{D}}[\alpha \log \pi_\theta(a\mid s) - Q_\phi(s, a)]
+  \mathcal{L}_\pi = \mathbb{E}_{s\sim\mathcal{D}} \sum_i w_i (\alpha \log p_i - Q_\phi(s, a_i)).
   \]
-- 值函数损失：
-  \[
-  \mathcal{L}_{Q} = \mathbb{E}\left[\bigl(Q_\phi(s,a) - y\bigr)^2 + \bigl(Q_\psi(s,a) - y\bigr)^2\right],
-  \]
-  其中
-  \[
-  y = r + \gamma\left(\min(Q_{\phi'}(s', a') , Q_{\psi'}(s', a')) - \alpha \log \pi_\theta(a'\mid s')\right).
-  \]
+- 温度自适应：$\alpha = e^{\log \alpha}$，目标熵 $H_{\text{tgt}} = \kappa \log |\mathcal{A}(s)|$，其中 $\kappa = \texttt{entropy\_kappa}$（默认 0.9）。损失
+  $\mathcal{L}_\alpha = -\log\alpha \cdot (H_{\text{tgt}} - H_{\text{emp}})$。
+- 目标网络通过指数滑动更新：$\theta' \leftarrow \tau \theta + (1-\tau) \theta'$ (`src/train_demo.py:2887-2895`)。
 
-## 前向伪代码
+## 训练流程伪代码
 ```pseudo
-function POLICY_FORWARD(tokens, lengths):
-    embedded = embedding(tokens)
-    _, hidden = encoder_gru(embedded, lengths)
-    prev = BOS
-    outputs = []
-    for step in range(MAX_DEC_LEN):
-        logits, hidden = decoder_gru(prev, hidden)
-        logits = apply_compliance_mask(logits, outputs)
-        probs = top_p_filter(softmax(logits / TAU_C), TOP_P)
-        sample = sample_from(probs)
-        outputs.append(sample)
-        if sample == EOS:
-            break
-        prev = sample
-    return outputs
+function UPDATE(agent):
+    batch = replay_buffer.sample(B)
+    state_tokens, state_lengths = tokenizer.batch_encode(states)
+    action_tokens, action_lengths = tokenizer.batch_encode(actions)
+
+    with torch.no_grad():
+        next_logits = policy.first_step_distribution(next_state_tokens)
+        candidates = select_top_p(next_logits, top_p)
+        q_expectation = combine_expectations(candidates, target_q1, target_q2, alpha)
+        target = rewards + gamma * (1 - dones) * q_expectation
+
+    q1 = q1_network(state_tokens, state_lengths, action_tokens, action_lengths)
+    q2 = q2_network(state_tokens, state_lengths, action_tokens, action_lengths)
+    optimize_mse(q1, target, optimizer_q1)
+    optimize_mse(q2, target, optimizer_q2)
+
+    freeze(q1, q2)
+    policy_candidates = select_top_p(policy.first_step_distribution(state_tokens), top_p)
+    policy_loss = expectation(alpha * log_prob - q1_candidate)
+    optimize(policy_loss, policy_optimizer)
+    unfreeze(q1, q2)
+
+    entropy = -(prob * log_prob).sum()
+    target_entropy = kappa * log(legal_token_count)
+    alpha_loss = -(log_alpha * (target_entropy - entropy))
+    optimize(alpha_loss, alpha_optimizer)
+    clamp(log_alpha, [\log \alpha_{\min}, \log \alpha_{\max}])
+
+    soft_update(target_q1, q1, tau)
+    soft_update(target_q2, q2, tau)
+
+    return metrics_dict
 ```
 
-## 参数与超参
-| 模块 | 关键参数 | 数值 | 说明 |
-| --- | --- | --- | --- |
-| 嵌入层 | `embedding_dim` | 96 | 词向量维度 |
-| 编码 GRU | `hidden_dim` | 128 | 双向堆叠两层 |
-| 解码 GRU | `hidden_dim` | 128 | 使用注意力初始化 |
-| 解码上限 | `max_summary_length` | 512 | 文本模式最大步骤 |
-| 优化器 | `Adam` 学习率 | $3\times10^{-4}$ | 策略与价值共享 |
-| 熵系数 | `alpha` 初始值 | 0.2 | 通过 $\mathcal{L}_\alpha$ 自适应 |
-| 软更新 | $\tau$ | 0.01 | 目标网络 EMA 系数 |
+## 关键超参数
+| 名称 | 默认来源 | 值/含义 |
+| --- | --- | --- |
+| `embedding_dim` | `DemoNetworkFactory.embedding_dim` | 字符嵌入维度，示例配置 96。 |
+| `hidden_dim` | `DemoNetworkFactory.hidden_dim` | GRU/MLP 隐状态维度，示例配置 128。 |
+| `max_summary_length` | `DemoNetworkFactory.max_summary_length` | 策略输出最大 token 长度。 |
+| `COMPLIANCE_INVALID_LOGIT_PENALTY` | 常量 (`src/train_demo.py:413`) | 12.0，非法 token 罚分。 |
+| `top_p` | `AgentConfig.top_p` | 默认 0.98，用于候选截断。 |
+| `alpha` 范围 | `ALPHA_MIN/ALPHA_MAX` (`src/train_demo.py:390-392`) | $[10^{-4}, 2]$，更新时夹紧。 |
+| `tau` | `AgentConfig.tau` | 软更新 EMA 系数，模板默认 0.01。 |
 
-## 训练拓扑
-1. 从 `SimpleReplayBuffer` 采样 batch，解码得到 $(s, a, r, s', \text{done})$。
-2. 计算目标动作 $a'$：对 $s'$ 运行策略并采样，保留 `stop_gradient` 的 logits 与 log-prob。
-3. 更新 $Q_\phi, Q_\psi$ 使其拟合目标 $y$；同步累积梯度裁剪到 $\pm 5$。
-4. 更新策略：最小化 $\mathcal{L}_{\pi}$，并记录 `policy_loss`、`entropy`、`alpha`。
-5. 更新熵系数 $\alpha$，保持在区间 $[10^{-4}, 2]$。
-6. 每步完成后执行软更新，刷新 (encoder, decoder, embedding) 的目标副本。
-
-## 子模块关系概览
-- Tokenizer (`CharTokenizer`) 向策略提供索引，策略输出经 `OperationParser` 转化为结构化动作。
-- `TextPolicyNetwork`、`TextQNetwork`、`ValueTargetNetwork` 共享嵌入矩阵，减少参数漂移。
-- 字符模式 bigram（更新）：使用 `chapter_char + raw_action_char` 组装；若 `action.text` 以 `chapter_char` 开头且长度≥2，`raw_action_char = last(action.text)`，否则取首字。
-
-若网络结构、超参或采样策略调整，请同步更新本文件与相关实现。
+## 代码映射
+- 合规与词典检查：`WordComplianceChecker`，`src/train_demo.py:230-381`。
+- 策略网络定义与采样：`TextPolicyNetwork`，`src/train_demo.py:2371-2525`。
+- 价值网络与工厂：`TextQNetwork`、`DemoNetworkFactory`，`src/train_demo.py:2572-2669`。
+- SAC 代理与更新逻辑：`DemoSACAgent`，`src/train_demo.py:2669-2897`。
+- 超参数常量：`src/train_demo.py:397-419`。

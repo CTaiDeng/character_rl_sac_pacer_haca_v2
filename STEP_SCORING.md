@@ -1,125 +1,122 @@
 # 当前 Step 打分方案
 
 ## 符号约定
-- $C_t = (F_t, V_t, H_t)$：第 $t$ 步结束后的认知资本，依次表示事实集、验证证据集、对冲假设集。
-- $B_t$：第 $t$ 步完成后的剩余预算；$B_0 = \texttt{DEFAULT\_INITIAL\_BUDGET}$。
-- $\mathcal{O}_t = \{o_1, \dots, o_{n_t}\}$：当前步的操作序列，$\mathrm{kind}(o)$ 和 $\mathrm{payload}(o)$ 分别为操作类型与参数。
-- $\mathrm{metrics}_t$：评估模块返回的指标字典，含 `similarity`、`coverage_ratio`、`novelty_ratio`、`lexical_cosine`、`lexical_js_similarity`、`garbled_ratio`、`word_noncompliance_ratio` 等键。
+- $C_t = (F_t, L_t, V_t, H_t)$ 表示第 $t$ 步的认知资本，分别存储事实、链接、已验证事实、已对冲事实。
+- $B_t$ 为剩余预算，初始值 $B_0 = \texttt{DEFAULT\_INITIAL\_BUDGET} = 1200$。
+- $\mathcal{O}_t = \{o_1, \dots, o_{n_t}\}$ 为解析得到的操作序列。
+- $c(o)$ 为单次操作成本，采用 `OPERATION_COSTS` 中的映射，未列出的操作使用 $\texttt{DEFAULT\_OPERATION\_COST} = 2$。
+- $\bar c_t = \sum_{i=1}^t \sum_{o\in\mathcal{O}_i} c(o)$ 为累计成本。
+- $\mathrm{metrics}_t$ 收集当前摘要质量指标（`similarity`、`coverage_ratio`、`novelty_ratio`、`lexical_cosine`、`lexical_js_similarity`、`garbled_ratio`、`word_noncompliance_ratio` 等）。
+- $\mathcal{N}_\gamma(x) = 1 - (1 - x)^\gamma$ 为奖励放大量表。
+- $V(C_t)$、$P(C_t)$ 分别表示 `CapitalValuator` 给出的价值与潜力。
 
-## 核心评价公式
-
-### 1. 操作成本
+## 成本与预算
 \[
- c_t = \sum_{o \in \mathcal{O}_t} \mathrm{cost}(\mathrm{kind}(o)),\qquad
- \bar{c}_t = \sum_{i=1}^{t} c_i
+ c_t = \sum_{o\in\mathcal{O}_t} c(o), \qquad
+ B_t = B_{t-1} - c_t, \qquad
+ \psi_t = \beta \, \max(0, -B_t),
 \]
-其中
+其中 $\beta = \texttt{BUDGET\_PENALTY\_WEIGHT} = 0.02$。当 episode 结束时，成本惩罚改为 $\lambda_t = \omega_c \, \bar c_t$，否则 $\lambda_t = \omega_c \, c_t$，权重 $\omega_c = \texttt{COST\_WEIGHT} = 0.08$。
+
+## 认知资本估值
+`CapitalValuator` 在 `src/train_demo.py:1074` 起定义：
 \[
- \mathrm{cost}(k) =
+\begin{aligned}
+ \mathrm{coverage}_t &= \frac{\bigl|\bigcup_{f\in F_t} T(f)\bigr|}{\bigl|\bigcup_{p\in\mathcal{P}} T(p)\bigr|},\\
+ \mathrm{diversity}_t &= \frac{|\{ \text{首词}(f):f\in F_t\}|}{|\mathcal{D}|},\\
+ \mathrm{redundancy}_t &= \frac{1}{|F_t|(|F_t|-1)} \sum_{f\neq f'} \mathrm{Jaccard}(T(f),T(f')),\\
+ \mathrm{verification}_t &= \frac{|V_t|}{|F_t|\vee 1},\quad
+ \mathrm{hedge}_t = \frac{|H_t|}{|F_t|\vee 1}.
+\end{aligned}
+\]
+价值函数
+\[
+ V(C_t) = \max\Bigl(0,\Bigl[
+ 1.5\,\mathrm{coverage}_t + 0.8\,\mathrm{diversity}_t - 0.6\,\mathrm{redundancy}_t
+ + 0.4\,\mathrm{verification}_t + 0.45 \ln(1+|F_t|)
+ \Bigr]\cdot(1 - 0.2\,\mathrm{hedge}_t)\Bigr),
+\]
+潜力 $P(C_t)$ 等同于 $V(C_t)$。潜力增益 $\Delta_t = P(C_t) - P(C_{t-1})$。
+
+## 质量与语言项
+质量项使用幂次 $\gamma_q = 4.0$，词汇项幂次 $\gamma_\ell = 3.5$，洁净项幂次 $\gamma_c = 5.0$：
+\[
+\begin{aligned}
+ Q_t &= 0.6\,\mathcal{N}_{4.0}(\texttt{similarity}) + 0.3\,\mathcal{N}_{4.0}(\texttt{coverage\_ratio}) + 0.1\,\mathcal{N}_{4.0}(\max(0,\texttt{novelty\_ratio})),\\
+ L_t &= 0.15\,\mathcal{N}_{3.5}(\texttt{lexical\_cosine}) + 0.10\,\mathcal{N}_{3.5}(\texttt{lexical\_js\_similarity}),\\
+ P_t &= 0.5\,\mathcal{N}_{5.0}(\texttt{garbled\_ratio}) + 0.7\,\mathcal{N}_{5.0}(\texttt{word\_noncompliance\_ratio}).
+\end{aligned}
+\]
+软奖励 $S_t = Q_t + L_t - P_t$。
+
+## 字符级增益
+在 `iteration_mode == "character"` 时额外计算
+\[
+ \chi_t = \max(0, Q_t + L_t),
+\]
+\[
+ \delta_t = \mathbf{1}_{\text{match}} \cdot
  \begin{cases}
-  \texttt{OPERATION\_COSTS}[k], & k \in \{\text{ACQUIRE}, \text{EXTRACT}, \text{LINK}, \text{VERIFY}, \text{HEDGE}, \text{TRIM}, \text{COMMIT}\} \\
-  \texttt{DEFAULT\_OPERATION\_COST}, & \text{其它类型}
+ 1.0, & \text{bigram 命中词典},\\
+ 0.5, & \text{bigram 未命中且字符匹配教师},\\
+ 0, & \text{否则},
  \end{cases}
 \]
-
-### 2. 资本价值函数
-定义覆盖率、深度、多样性、冗余、验证度与对冲占比：
+其中 `match` 表示预测首字符等于教师目标字符，bigram 为 `chapter_char + raw_action_char`，构建逻辑见 `src/train_demo.py:2234-2264`。该模式下
 \[
 \begin{aligned}
- \kappa_t &= \frac{\bigl|\bigcup_{f \in F_t} T(f)\bigr|}{\bigl|\bigcup_{p \in \mathcal{P}} T(p)\bigr|}, &
- \delta_t &= \frac{\bigl|\{\mathrm{domain}(f) : f \in F_t\}\bigr|}{|\mathcal{D}|},\\
- \rho_t &= \mathrm{Jaccard}(F_t, F_{t-1}), &
- \nu_t &= \frac{|V_t|}{\max(1, |F_t|)},\\
- \eta_t &= \frac{|H_t|}{\max(1, |F_t| + |H_t|)}.
-\end{aligned}
-\]
-资本价值定义为
-\[
- V(C_t) = \sigma\Bigl(w_c\kappa_t + w_d \delta_t + w_v \nu_t - w_r \rho_t - w_h \eta_t + w_f \ln(1 + |F_t|)\Bigr),
-\]
-其中 $\sigma(x) = \dfrac{1}{1 + e^{-x}}$。潜力增量记为 $\Delta\Phi_t = V(C_t) - V(C_{t-1})$。
-
-### 3. 预算约束与罚项
-\[
- B_t = B_{t-1} - c_t,\qquad
- \lambda_t = \gamma_c\, c_t + \gamma_{\text{cum}}\, \bar{c}_t,\qquad
- \psi_t = \beta \max(0, -B_t).
-\]
-
-### 4. 软指标
-引入非线性映射 $\mathcal{N}_\gamma(x) = 1 - (1-x)^{\gamma}$：
-\[
-\begin{aligned}
- Q_t &= w_s\, \mathcal{N}_{4.0}(\mathrm{metrics}_t[\texttt{similarity}]) + w_{cov}\, \mathcal{N}_{4.0}(\mathrm{metrics}_t[\texttt{coverage\_ratio}]) + w_{nov}\, \mathcal{N}_{4.5}(\max(0, \mathrm{metrics}_t[\texttt{novelty\_ratio}]))\\
- L_t &= w_{lex}\, \mathcal{N}_{3.5}(\mathrm{metrics}_t[\texttt{lexical\_cosine}]) + w_{js}\, \mathcal{N}_{3.0}(\mathrm{metrics}_t[\texttt{lexical\_js\_similarity}])\\
- P_t &= w_{gar}\, \mathcal{N}_{5.0}(\mathrm{metrics}_t[\texttt{garbled\_ratio}]) + w_{word}\, \mathcal{N}_{5.0}(\mathrm{metrics}_t[\texttt{word\_noncompliance\_ratio}])
+ B_t^{\text{char}} &= B_t + 0.5\,\chi_t + \delta_t,\\
+ \Delta_t^{\text{char}} &= \Delta_t + 0.25\,\chi_t.
 \end{aligned}
 \]
 
-### 5. Step 总得分
+## Step 奖励合成
+综合 `src/train_demo.py:2181-2268`：
 \[
- R_t = \alpha_{\text{base}} V(C_t) + \Delta\Phi_t + Q_t + L_t - P_t - \lambda_t - \psi_t.
+ R_t = V(C_t) - \lambda_t - \psi_t + S_t +
+ \begin{cases}
+ \Delta_t, & \text{章节模式},\\
+ \Delta_t + 0.5\,\chi_t + 0.25\,\chi_t + \delta_t, & \text{字符模式}.
+ \end{cases}
 \]
+环境同时记录 `capital_metrics`、`reward_*` 分量用于调试。
 
-## 参数取值
-| 符号 | 数值 | 说明 |
-| --- | --- | --- |
-| $\texttt{OPERATION\_COSTS}$ | `{ACQUIRE:3, EXTRACT:3, LINK:2, VERIFY:4, HEDGE:1.5, TRIM:1, COMMIT:5}` | 见 `src/train_demo.py` 中的 `OPERATION_COSTS` |
-| $\texttt{DEFAULT\_OPERATION\_COST}$ | $2$ | 未列出的操作默认成本 |
-| $w_c, w_d, w_v, w_r, w_h, w_f$ | $1.6, 0.9, 0.5, 0.6, 0.3, 0.45$ | 资本价值权重 |
-| $\gamma_c, \gamma_{\text{cum}}$ | $0.08, 0.02$ | 成本罚项系数 |
-| $\beta$ | $0.02$ | 预算穿透罚项系数 |
-| $w_s, w_{cov}, w_{nov}$ | $0.6, 0.25, 0.15$ | 语义质量权重 |
-| $w_{lex}, w_{js}$ | $0.18, 0.12$ | 词法质量权重 |
-| $w_{gar}, w_{word}$ | $0.5, 0.7$ | 清洁度惩罚权重 |
-| $\alpha_{\text{base}}$ | $0.6$ | 基础资本权重 |
-
-## α 伪代码
+## 伪代码
 ```pseudo
-function STEP_SCORE(prev_capital, prev_budget, operations, metrics, is_terminal):
-    cost = sum(cost_of(op.kind) for op in operations)
-    cumulative_cost = update_cumulative(cost, is_terminal)
-    budget = prev_budget - cost
+function STEP_REWARD(state, operations, metrics, is_terminal):
+    cost = sum(OPERATION_COSTS.get(op.kind, DEFAULT_OPERATION_COST) for op in operations)
+    cumulative_cost = state.cumulative_cost + cost
+    budget = state.budget - cost
+    capital_before = state.capital.clone()
+    capital_after = apply_operations(capital_before, operations)
 
-    capital = apply_operations(prev_capital, operations)
-    value_prev = capital_value(prev_capital)
-    value_new = capital_value(capital)
-    potential_gain = value_new - value_prev
+    capital_value = valuator.value(capital_after)
+    potential_gain = valuator.potential(capital_after) - valuator.potential(capital_before)
 
-    lambda_penalty = GAMMA_C * cost + GAMMA_CUM * cumulative_cost
-    budget_penalty = BETA * max(0.0, -budget)
+    cost_penalty = COST_WEIGHT * (cumulative_cost if is_terminal else cost)
+    budget_penalty = BUDGET_PENALTY_WEIGHT * max(0.0, -budget)
 
-    quality = (
-        W_S * nonlinear(metrics["similarity"], 4.0)
-        + W_COV * nonlinear(metrics["coverage_ratio"], 4.0)
-        + W_NOV * nonlinear(max(0.0, metrics["novelty_ratio"]), 4.5)
-    )
-    lexical = (
-        W_LEX * nonlinear(metrics["lexical_cosine"], 3.5)
-        + W_JS * nonlinear(metrics["lexical_js_similarity"], 3.0)
-    )
-    penalty = (
-        W_GAR * nonlinear(metrics["garbled_ratio"], 5.0)
-        + W_WORD * nonlinear(metrics["word_noncompliance_ratio"], 5.0)
-    )
+    quality = quality_component(metrics)
+    lexical = lexical_component(metrics)
+    cleanliness = cleanliness_penalty(metrics)
+    soft_reward = quality + lexical - cleanliness
 
-    reward = (
-        ALPHA_BASE * value_new
-        + potential_gain
-        + quality + lexical - penalty
-        - lambda_penalty - budget_penalty
-    )
+    base_component = capital_value - cost_penalty - budget_penalty
+    potential_component = potential_gain
 
-    if is_terminal:
-        reward += terminal_adjustment(capital)
+    if iteration_mode == "character":
+        quality_signal = max(0.0, quality + lexical)
+        base_component += CHARACTER_BASE_QUALITY_WEIGHT * quality_signal
+        potential_component += CHARACTER_POTENTIAL_QUALITY_WEIGHT * quality_signal
+        base_component += compute_bigram_bonus(state, operations)
 
-    return reward, capital, budget
+    total_reward = base_component + potential_component + soft_reward
+    return total_reward, capital_after, budget, cumulative_cost
 ```
 
 ## 实现映射
-- 认知资本、潜力与价值评估在 `src/train_demo.py` 的 `CognitiveCapital` 与 `CapitalValuator` 中实现。
-- 操作成本与预算更新位于 `ArticleEnvironment.step` 的 `_apply_operations` 链路。
-- 软指标由 `SummarizationMetrics` 计算，位于 `src/train_demo.py` 的 `analyze_summary` 函数附近。
-- 字符模式 bigram（更新）：`lexical_bigram_candidate = chapter_char + raw_action_char`；若 `action.text` 以 `chapter_char` 开头且长度≥2，则 `raw_action_char = last(action.text)`，否则取首字；命中词表时 `metrics['reward_lexical'] = 1.0`，匹配教师目标而未命中词表时为 `CHARACTER_TEACHER_BIGRAM_FALLBACK`，其余情况为 0。
-
-如在代码层调整参数或函数，请同步更新本文档。
+- `操作成本与预算`：`src/train_demo.py:2147-2179`，`OPERATION_COSTS` 定义于 `src/train_demo.py:421-428`。
+- `认知资本估值`：`CognitiveCapital` 与 `CapitalValuator` 定义于 `src/train_demo.py:959-1179`。
+- `质量/语言/洁净组件`：`src/train_demo.py:2193-2212`。
+- `字符模式加成与 bigram 奖励`：`src/train_demo.py:2220-2266`。
+- `奖励写入与日志`：`ArticleEnvironment.step` 中 `src/train_demo.py:2142-2280`。
