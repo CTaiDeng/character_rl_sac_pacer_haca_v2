@@ -2297,6 +2297,11 @@ class ArticleEnvironment:
                 chapter_text="",
                 step_index=self._cursor + 1,
             )
+        bigram_bonus_value = (
+            float(applied_lexical_bonus)
+            if self._iteration_mode == "character"
+            else float(lexical_bigram_bonus)
+        )
         metrics.update({
             "capital_value": float(capital_value),
             "capital_operations": float(applied_operations),
@@ -2307,7 +2312,8 @@ class ArticleEnvironment:
             "reward_base": float(base_component),
             "reward_potential_gain": float(potential_component),
             "reward_soft_bonus": float(soft_component),
-            "lexical_bigram_bonus": float(applied_lexical_bonus if self._iteration_mode == "character" else lexical_bigram_bonus),
+            "lexical_bigram_bonus": bigram_bonus_value,
+            "reward_lexical": bigram_bonus_value,
             "lexical_bigram_candidate": bigram_candidate if self._iteration_mode == "character" else "",
             "lexical_bigram_hit": bool(lexical_bigram_hit) if self._iteration_mode == "character" else False,
             "lexical_bigram_sources": ", ".join(lexical_bigram_sources) if self._iteration_mode == "character" else "",
@@ -3284,6 +3290,8 @@ class DemoTrainer(Trainer):
                 "lexical_cosine": metrics.get("lexical_cosine", 0.0),
                 "lexical_js_similarity": metrics.get("lexical_js_similarity", 0.0),
                 "lexical_token_count": metrics.get("lexical_token_count", 0.0),
+                "reward_lexical": metrics.get("reward_lexical", 0.0),
+                "lexical_bigram_bonus": metrics.get("lexical_bigram_bonus", 0.0),
                 "capital_value": metrics.get("capital_value", 0.0),
                 "capital_coverage": metrics.get("capital_coverage", 0.0),
                 "capital_diversity": metrics.get("capital_diversity", 0.0),
@@ -3306,7 +3314,7 @@ class DemoTrainer(Trainer):
                 ("reward_base", "reward_base", "基础奖励，结合资本价值与预算成本"),
                 ("reward_potential", "reward_potential_gain", "潜在价值增量"),
                 ("reward_soft", "reward_soft_bonus", "摘要质量软奖励"),
-                ("reward_lexical", "lexical_bigram_bonus", "字符二元组奖励，匹配词表中的二元组合时触发"),
+                ("reward_lexical", "reward_lexical", "字符二元组奖励，匹配词表中的二元组合时触发"),
                 ("len_ratio", "length_ratio", "摘要长度与信息源比值，偏低会导致覆盖不足"),
                 ("sim", "similarity", "字符级相似度，衡量摘要整体贴近原文的程度"),
                 ("coverage", "coverage_ratio", "覆盖率，统计摘要覆盖原文字符的比例"),
@@ -3782,6 +3790,13 @@ def build_demo_components(
     }
     combined_charset = set(common_charset or [])
     combined_charset.update(reference_charset)
+    environment_charset = {
+        char
+        for text in tokenizer_corpus
+        for char in text
+        if _is_cjk(char)
+    }
+    combined_charset.update(environment_charset)
     tokenizer = CharTokenizer(
         tokenizer_corpus,
         summary_charset=combined_charset or None,

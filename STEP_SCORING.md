@@ -120,6 +120,6 @@ function STEP_SCORE(prev_capital, prev_budget, operations, metrics, is_terminal)
 - 认知资本、潜力与价值评估在 `src/train_demo.py` 的 `CognitiveCapital` 与 `CapitalValuator` 中实现。
 - 操作成本与预算更新位于 `ArticleEnvironment.step` 的 `_apply_operations` 链路。
 - 软指标由 `SummarizationMetrics` 计算，位于 `src/train_demo.py` 的 `analyze_summary` 函数附近。
-- 字符模式 bigram（更新）：`lexical_bigram_candidate = chapter_char + raw_action_char`；若 `action.text` 以 `chapter_char` 开头且长度≥2，则 `raw_action_char = last(action.text)`，否则取首字。
+- 字符模式 bigram（更新）：`lexical_bigram_candidate = chapter_char + raw_action_char`；若 `action.text` 以 `chapter_char` 开头且长度≥2，则 `raw_action_char = last(action.text)`，否则取首字；命中词表时 `metrics['reward_lexical'] = 1.0`，匹配教师目标而未命中词表时为 `CHARACTER_TEACHER_BIGRAM_FALLBACK`，其余情况为 0。
 
 如在代码层调整参数或函数，请同步更新本文档。

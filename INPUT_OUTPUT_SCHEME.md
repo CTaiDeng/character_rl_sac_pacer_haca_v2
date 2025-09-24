@@ -63,7 +63,7 @@
 - raw_action_char 提取：
   - 教师动作（常见为 `chapter_char + next_char`）：若 `action.text` 以 `chapter_char` 开头且长度≥2，则取 `action.text` 的末字；
   - 其他情况：取 `action.text` 的首字。
-- 记录位置：`metrics['lexical_bigram_candidate']` 记录该 bigram；命中词表时 `lexical_bigram_bonus` 取 `CHARACTER_LEXICAL_BIGRAM_BONUS`，否则在 `match_char` 时回退 `CHARACTER_TEACHER_BIGRAM_FALLBACK`。
+- 记录位置：`metrics['lexical_bigram_candidate']` 保存候选；命中词表时 `reward_lexical = CHARACTER_LEXICAL_BIGRAM_BONUS`，否则在 `match_char` 时回退 `CHARACTER_TEACHER_BIGRAM_FALLBACK`，并同步写入兼容字段 `lexical_bigram_bonus`。
 
 ## 输入输出伪代码
 ```pseudo
@@ -90,7 +90,6 @@ function ENV_STEP(state, policy, replay_buffer):
         state.capital, state.budget, operations, analyze_summary(action_text), state.done
     )
 
-    # 字符模式 bigram：chapter + raw_action
     if mode == "character":
         chapter_char = target_char
         if startswith(action_text, chapter_char) and length(action_text) >= 2:
@@ -98,6 +97,9 @@ function ENV_STEP(state, policy, replay_buffer):
         else:
             raw_action_char = first(action_text)
         bigram = chapter_char ++ raw_action_char
+        reward_lexical =
+            CHARACTER_LEXICAL_BIGRAM_BONUS if bigram in bigram_reference
+            else (CHARACTER_TEACHER_BIGRAM_FALLBACK if matches_teacher_target(predicted_char) else 0)
 
     next_observation = TextObservation(
         render_text(capital_after, budget_after),
@@ -110,12 +112,12 @@ function ENV_STEP(state, policy, replay_buffer):
 ```
 
 ## 日志与缓存字段
-- `metrics`: 记录 `similarity`、`coverage_ratio`、`novelty_ratio`、`lexical_cosine`、`lexical_js_similarity`、`garbled_ratio`、`word_noncompliance_ratio`，写入 `out/metrics_logs/*.csv`。
+- `metrics`: 记录 `similarity`、`coverage_ratio`、`novelty_ratio`、`lexical_cosine`、`lexical_js_similarity`、`garbled_ratio`、`word_noncompliance_ratio`、`reward_lexical` 等字段，写入 `out/metrics_logs/*.csv`。
 - `capital_metrics`: 由 `CapitalValuator.metrics` 产生，含 `capital_value`、`topic_coverage`、`fact_count` 等字段，用于调试面板。
 - 预算轨迹：`budget_remaining`、`budget_breach`、`operation_cost`、`cumulative_cost` 持久化于 episode summary。
-- 字符模式额外日志：`predicted_char`、`target_char`、`lexical_bigram_bonus`、`lexical_bigram_candidate`（按上节定义）。
+- 字符模式额外日志：`predicted_char`、`target_char`、`lexical_bigram_bonus`、`lexical_bigram_candidate`、`lexical_bigram_sources`（命中词表时给出出处）。
 
 ## 一致性约束
-- 若 `CharTokenizer` 的特殊标记或 `max_observation_length` 调整，需同步更新观测拼接公式。
+- 若 `CharTokenizer` 的特殊标记或 `max_observation_length` 调整，需同步更新观测拼接公式；当前 tokenizer 的字符集来自环境目标字符与参考动作、样例文章的联合，避免章节中出现的汉字被编码为 `<unk>`。
 - 若操作集合或成本表变动，需同步更新 $\mathrm{cost}(\cdot)$ 及预算更新逻辑。
 - 新增指标时请在 `metrics` 字典中添加键名，并在 `STEP_SCORING.md` 中补充对应权重。
