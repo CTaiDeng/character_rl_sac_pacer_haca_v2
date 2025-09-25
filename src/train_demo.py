@@ -209,16 +209,19 @@ def _format_source_catalog_annotation(term: str) -> str:
         return annotation
     lookup = term.strip()
     if len(lookup) < 2:
-        return annotation
-    prefix = lookup[:2]
-    prefix_annotation, prefix_matched = _describe_word_catalog_annotation(prefix)
-    if not prefix_matched:
-        return annotation
-    if prefix_annotation.startswith(" (") and prefix_annotation.endswith(")"):
-        inner = prefix_annotation[2:-1]
-    else:
-        inner = prefix_annotation
-    return f' (前缀"{prefix}": {inner})'
+    best_annotation = ""
+    for prefix_len in range(len(lookup), 1, -1):
+    for prefix_len in range(min(len(lookup), 8), 1, -1):
+        prefix = lookup[:prefix_len]
+        prefix_annotation, prefix_matched = _describe_word_catalog_annotation(prefix)
+        if prefix_matched:
+            if prefix_annotation.startswith(" (") and prefix_annotation.endswith(")"):
+                inner = prefix_annotation[2:-1]
+            else:
+                inner = prefix_annotation
+            best_annotation = f' (前缀"{prefix}": {inner})'
+            break
+    return best_annotation or annotation
 
 STEP_CSV_HEADERS = [
     "round",
@@ -2112,6 +2115,37 @@ class ArticleEnvironment:
                     pairs.add(cleaned)
         return pairs
 
+
+    def _forward_extend_bigram(self, base_bigram: str) -> tuple[str, str]:
+        """Extend bigram to the right until the suffix of length two matches catalog."""
+
+        candidate = base_bigram[-2:] if len(base_bigram) >= 2 else base_bigram
+        if len(candidate) == 2 and candidate in self._lexical_bigram_pairs:
+            return candidate, candidate
+
+        if not self._char_truth_pairs:
+            return candidate, base_bigram
+
+        suffix_sequence = base_bigram
+        future_chars: list[str] = []
+        for index in range(self._cursor + 1, min(len(self._char_truth_pairs), self._cursor + 8)):
+            pair = self._char_truth_pairs[index]
+            if not pair:
+                continue
+            future_char = pair[-1:]
+            if future_char:
+                future_chars.append(future_char)
+
+        for future_char in future_chars:
+            suffix_sequence += future_char
+            if len(suffix_sequence) < 2:
+                continue
+            suffix = suffix_sequence[-2:]
+            if suffix in self._lexical_bigram_pairs:
+                return suffix, suffix_sequence
+
+        return candidate, base_bigram
+
     def reset(self) -> TextObservation:
         self._cursor = 0
         self._capital = CognitiveCapital()
@@ -2270,8 +2304,14 @@ class ArticleEnvironment:
             bigram_candidate = (
                 (chapter_char + raw_action_char) if (chapter_char and raw_action_char) else ""
             )
+            bigram_sequence_display = bigram_candidate
             if len(bigram_candidate) > 2:
                 bigram_candidate = bigram_candidate[-2:]
+            if bigram_candidate:
+                extended_bigram, extended_sequence = self._forward_extend_bigram(bigram_candidate)
+                bigram_candidate = extended_bigram or bigram_candidate
+                if extended_sequence:
+                    bigram_sequence_display = extended_sequence
             match_char = bool(truth_expected_char and predicted_action_char == truth_expected_char)
             if len(bigram_candidate) == 2:
                 if bigram_candidate in self._lexical_bigram_pairs:
@@ -2338,7 +2378,7 @@ class ArticleEnvironment:
             "reward_soft_bonus": float(soft_component),
             "lexical_bigram_bonus": bigram_bonus_value,
             "reward_lexical": bigram_bonus_value,
-            "lexical_bigram_candidate": bigram_candidate if self._iteration_mode == "character" else "",
+            "lexical_bigram_candidate": bigram_sequence_display if self._iteration_mode == "character" else "",
             "lexical_bigram_hit": bool(lexical_bigram_hit) if self._iteration_mode == "character" else False,
             "lexical_bigram_sources": ", ".join(lexical_bigram_sources) if self._iteration_mode == "character" else "",
             "reward": reward,
