@@ -2116,35 +2116,118 @@ class ArticleEnvironment:
         return pairs
 
 
-    def _forward_extend_bigram(self, base_bigram: str) -> tuple[str, str]:
-        """Extend bigram to the right until the suffix of length two matches catalog."""
 
-        candidate = base_bigram[-2:] if len(base_bigram) >= 2 else base_bigram
-        if len(candidate) == 2 and candidate in self._lexical_bigram_pairs:
-            return candidate, candidate
 
-        if not self._char_truth_pairs:
-            return candidate, base_bigram
 
-        suffix_sequence = base_bigram
+
+
+    def _collect_future_chars(self, limit: int = 8, start_offset: int = 1) -> list[str]:
         future_chars: list[str] = []
-        for index in range(self._cursor + 1, min(len(self._char_truth_pairs), self._cursor + 8)):
+        if not self._char_truth_pairs:
+            return future_chars
+        start_index = self._cursor + start_offset
+        end_index = min(len(self._char_truth_pairs), start_index + max(0, limit))
+        for index in range(start_index, end_index):
             pair = self._char_truth_pairs[index]
             if not pair:
                 continue
-            future_char = pair[-1:]
-            if future_char:
-                future_chars.append(future_char)
+            next_char = pair[-1:]
+            if next_char:
+                future_chars.append(next_char)
+        return future_chars
 
-        for future_char in future_chars:
+    def _forward_extend_bigram(self, base_bigram: str) -> tuple[str, str]:
+        """Extend bigram forward; return suffix used for scoring and logging."""
+
+        candidate_suffix = base_bigram[-2:] if len(base_bigram) >= 2 else base_bigram
+        suffix_sequence = base_bigram
+        for future_char in self._collect_future_chars():
             suffix_sequence += future_char
-            if len(suffix_sequence) < 2:
-                continue
-            suffix = suffix_sequence[-2:]
-            if suffix in self._lexical_bigram_pairs:
-                return suffix, suffix_sequence
+            if len(suffix_sequence) >= 2:
+                suffix_candidate = suffix_sequence[-2:]
+                if suffix_candidate in self._lexical_bigram_pairs:
+                    return suffix_candidate, suffix_sequence
+        if len(suffix_sequence) >= 2:
+            candidate_suffix = suffix_sequence[-2:]
+        return candidate_suffix, suffix_sequence
 
-        return candidate, base_bigram
+    def _extend_raw_action_sequence(
+            self,
+            initial_char: str,
+            *,
+            existing_tail: str = "",
+            limit: int = 8,
+    ) -> tuple[str, str, str]:
+        if not initial_char:
+            return "", "", ""
+
+        tail = existing_tail or ""
+        while tail.startswith(initial_char) and tail:
+            tail = tail[len(initial_char):]
+
+        candidate = initial_char
+        suffix_segment = ""
+        annotation_text = ""
+        matched = False
+
+        def _normalize_annotation(value: str) -> str:
+            return value[2:-1] if value.startswith(" (") and value.endswith(")") else value
+
+        def _lookup_suffix(segment: str) -> tuple[str, str, bool]:
+            if not segment:
+                return "", "", False
+            annotation, matched_flag = _describe_word_catalog_annotation(segment)
+            return segment, _normalize_annotation(annotation), matched_flag
+
+        def _find_suffix(text_value: str) -> tuple[str, str, bool]:
+            if not text_value:
+                return "", "", False
+            max_len = min(len(text_value), 8)
+            fallback_segment = ""
+            fallback_annotation = ""
+            for length in range(max_len, 1, -1):
+                segment = text_value[-length:]
+                if not all(_is_cjk(ch) for ch in segment):
+                    continue
+                seg, ann, hit = _lookup_suffix(segment)
+                if hit:
+                    return seg, ann, True
+                if not fallback_segment:
+                    fallback_segment, fallback_annotation = seg, ann
+            if not fallback_segment:
+                for length in range(max_len, 0, -1):
+                    segment = text_value[-length:]
+                    if not all(_is_cjk(ch) for ch in segment):
+                        continue
+                    seg, ann, hit = _lookup_suffix(segment)
+                    return seg, ann, hit
+            return fallback_segment, fallback_annotation, False
+
+        def _append_char(char: str) -> bool:
+            nonlocal candidate, suffix_segment, annotation_text, matched
+            if not char:
+                return False
+            if len(candidate) == 1 and char == candidate[0]:
+                return False
+            candidate += char
+            suffix_segment, annotation_text, matched = _find_suffix(candidate[len(initial_char):])
+            return matched and len(suffix_segment) >= 2
+
+        for char in tail:
+            if _append_char(char):
+                break
+
+        if not (matched and len(suffix_segment) >= 2):
+            for char in self._collect_future_chars(limit=limit):
+                if _append_char(char):
+                    break
+
+        suffix_segment, annotation_text, matched = _find_suffix(candidate[len(initial_char):])
+        suffix_annotation = ""
+        if suffix_segment:
+            display_text = annotation_text if annotation_text else "未命中"
+            suffix_annotation = f' (后缀"{suffix_segment}": {display_text})'
+        return candidate, suffix_segment, suffix_annotation
 
     def reset(self) -> TextObservation:
         self._cursor = 0
@@ -2299,19 +2382,37 @@ class ArticleEnvironment:
                     raw_action_char = action.text[-1]
                 else:
                     raw_action_char = action.text[:1]
+            raw_existing_tail = ""
+            if action.text and raw_action_char:
+                idx_char = action.text.find(raw_action_char)
+                if idx_char != -1:
+                    raw_existing_tail = action.text[idx_char + len(raw_action_char):]
+            raw_action_sequence, raw_suffix, raw_suffix_annotation = self._extend_raw_action_sequence(
+                raw_action_char,
+                existing_tail=raw_existing_tail,
+            )
+            if not raw_action_sequence and raw_action_char:
+                raw_action_sequence = raw_action_char
             # Current chapter target character
             chapter_char = target_char or ""
-            bigram_candidate = (
-                (chapter_char + raw_action_char) if (chapter_char and raw_action_char) else ""
-            )
-            bigram_sequence_display = bigram_candidate
-            if len(bigram_candidate) > 2:
-                bigram_candidate = bigram_candidate[-2:]
-            if bigram_candidate:
-                extended_bigram, extended_sequence = self._forward_extend_bigram(bigram_candidate)
-                bigram_candidate = extended_bigram or bigram_candidate
+            base_sequence = ""
+            if chapter_char and raw_action_sequence:
+                base_sequence = chapter_char + raw_action_sequence
+            elif chapter_char and raw_action_char:
+                base_sequence = chapter_char + raw_action_char
+            else:
+                base_sequence = raw_action_sequence or raw_action_char or ""
+            bigram_sequence_display = base_sequence
+            suffix_source = raw_action_sequence or base_sequence
+            if len(suffix_source) >= 2:
+                bigram_candidate = suffix_source[-2:]
+            elif base_sequence:
+                extended_bigram, extended_sequence = self._forward_extend_bigram(base_sequence)
+                bigram_candidate = extended_bigram or base_sequence[-2:]
                 if extended_sequence:
                     bigram_sequence_display = extended_sequence
+            else:
+                bigram_candidate = ""
             match_char = bool(truth_expected_char and predicted_action_char == truth_expected_char)
             if len(bigram_candidate) == 2:
                 if bigram_candidate in self._lexical_bigram_pairs:
@@ -2381,6 +2482,9 @@ class ArticleEnvironment:
             "lexical_bigram_candidate": bigram_sequence_display if self._iteration_mode == "character" else "",
             "lexical_bigram_hit": bool(lexical_bigram_hit) if self._iteration_mode == "character" else False,
             "lexical_bigram_sources": ", ".join(lexical_bigram_sources) if self._iteration_mode == "character" else "",
+            "raw_action_sequence": raw_action_sequence if self._iteration_mode == "character" else action.text,
+            "raw_action_suffix": raw_suffix if self._iteration_mode == "character" else "",
+            "raw_action_suffix_annotation": raw_suffix_annotation if self._iteration_mode == "character" else "",
             "reward": reward,
             "canonical_summary_text": canonical_summary,
             "summary_raw_length": float(len(action.text)),
@@ -3347,32 +3451,46 @@ class DemoTrainer(Trainer):
             metrics = self.environment.last_metrics
 
             canonical_summary_text = metrics.get("canonical_summary_text", action.text)
+            raw_action_sequence = metrics.get("raw_action_sequence", action.text)
+            raw_suffix_annotation = ""
             if character_mode:
                 summary_text_for_preview = sanitized_chapter or canonical_summary_text[:1]
                 if use_teacher:
                     display_action_text = next_char or target_char or action.text[:1]
                 else:
                     display_action_text = action.text[:1] if action.text else ""
-                raw_text_for_preview = display_action_text
+                raw_action_sequence = metrics.get("raw_action_sequence", raw_action_sequence or display_action_text)
+                raw_suffix_annotation = metrics.get("raw_action_suffix_annotation", raw_suffix_annotation)
+                raw_text_for_preview = raw_action_sequence or display_action_text
             else:
                 summary_text_for_preview = canonical_summary_text.replace("\n", "\\n")
                 raw_text_for_preview = action.text.replace("\n", "\\n")
             summary_len, summary_preview = _format_text_debug(summary_text_for_preview, 20, 20)
             raw_summary_len, raw_summary_preview = _format_text_debug(raw_text_for_preview, 20, 20)
             raw_summary_len_str = self._format_length(raw_summary_len, character_mode)
+            annotation_suffix = raw_suffix_annotation if character_mode else ""
             stanza_lines.append(
-                f"           | raw_action={raw_summary_len_str} chars \"{raw_summary_preview}\""
+                f"           | raw_action={raw_summary_len_str} chars \"{raw_summary_preview}\"" + annotation_suffix
             )
             if character_mode:
                 combined_raw = str(metrics.get("lexical_bigram_candidate", ""))
                 if not combined_raw:
                     target_component_raw = target_char or ""
-                    predicted_component_raw = display_action_text or ""
+                    predicted_component_raw = (raw_action_sequence or display_action_text or "")
                     combined_raw = target_component_raw + predicted_component_raw
                 bigram_length = len(combined_raw)
                 bigram_preview = combined_raw.replace("\n", "\\n").replace('"', '\"')
                 bigram_len_str = self._format_length(bigram_length, True)
-                bigram_annotation = _format_word_catalog_annotation(combined_raw)
+                raw_suffix_value = str(metrics.get("raw_action_suffix", ""))
+                if raw_suffix_value:
+                    suffix_annotation_text, _ = _describe_word_catalog_annotation(raw_suffix_value)
+                    if suffix_annotation_text.startswith(" (") and suffix_annotation_text.endswith(")"):
+                        suffix_annotation_text = suffix_annotation_text[2:-1]
+                    annotation_display = suffix_annotation_text if suffix_annotation_text else "未命中"
+                    bigram_annotation = f' (后缀"{raw_suffix_value}": {annotation_display})'
+                else:
+                    bigram_annotation = _format_word_catalog_annotation(combined_raw)
+
                 stanza_lines.append(
                     f'           | bigram={bigram_len_str} chars "{bigram_preview}"{bigram_annotation}'
                 )
