@@ -1942,12 +1942,6 @@ def _augment_lexical_statistics_with_bigrams(
     stats.corpus_frequency = corpus_frequency
     stats.document_frequency = document_frequency
     stats.idf = idf
-    stats_path = article_path.parent / f"{article_path.stem}{LEXICAL_STATS_SUFFIX}"
-    try:
-        stats.save(stats_path)
-    except OSError:
-        pass
-
 
 def _run_inline_lexical_evaluation(
         lexical_stats: ChapterLexicalStatistics | None,
