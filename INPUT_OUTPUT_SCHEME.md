@@ -4,6 +4,7 @@
 - 记忆状态 $C_t$ 由 `CognitiveCapital` 管理，预算 $B_t$ 为环境中的剩余成本额度。
 - 第 $t$ 步观测 $O_t = (s_t, \chi_t, i_t)$：$s_t = \sigma(C_{t-1}, B_{t-1})$ 来自 `CognitiveCapital.render_text`，$\chi_t$ 为章节文本或字符目标，$i_t$ 为游标索引。
 - 在章节模式下 $\chi_t = \text{chapters}[t]$；字符模式下 $\chi_t$ 为上一对教师字符（`src/train_demo.py:2072-2115`）。
+- 字符模式下 DemoTrainer 会依据配置项 `character_history_extension_limit`（`config_template.json`, `res/config.json`，默认值 $16$）自左向右回溯历史字符对，扩展 $\mathrm{prev\_summary}$ 直至命中词典或达到上限，再组合 $source = prev\_summary + chapter$ 用于日志（`src/train_demo.py:3180-3211`）。
 
 ## 编码函数
 - `CharTokenizer.encode_observation` (`src/train_demo.py:543-625`) 构造 token 序列

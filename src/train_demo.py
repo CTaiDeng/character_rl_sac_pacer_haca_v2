@@ -325,6 +325,13 @@ def _load_training_config() -> tuple[dict[str, Any], Path]:
             1,
         ),
     )
+    char_history_extension_limit = max(
+        0,
+        _as_int(
+            raw_config.get("character_history_extension_limit"),
+            16,
+        ),
+    )
     config = {
         "reference_actions_path": reference_path,
         "reference_warmup_rounds": warmup_rounds,
@@ -335,6 +342,7 @@ def _load_training_config() -> tuple[dict[str, Any], Path]:
         "paragraph_merge_strategy": merge_strategy,
         "character_teacher_interval": character_teacher_interval,
         "character_length_field_width": char_length_width,
+        "character_history_extension_limit": char_history_extension_limit,
     }
     return config, config_path
 
@@ -3047,6 +3055,7 @@ class DemoTrainer(Trainer):
             char_pairs_per_round: Sequence[Sequence[str]] | None = None,
             character_teacher_interval: int = 0,
             character_length_field_width: int = 1,
+            character_history_extension_limit: int = 16,
     ) -> None:
         super().__init__(agent, environment, config, logger)
         self._intervals = list(intervals)
@@ -3067,6 +3076,7 @@ class DemoTrainer(Trainer):
         )
         self._character_teacher_interval = max(0, character_teacher_interval)
         self._char_length_field_width = max(1, character_length_field_width)
+        self._char_history_extension_limit = max(0, int(character_history_extension_limit))
 
     def _format_length(self, length: int, character_mode: bool) -> str:
         if character_mode:
@@ -3180,7 +3190,48 @@ class DemoTrainer(Trainer):
                 sanitized_prev = state.previous_summary
                 target_display_char = target_char or (target_pair[-1:] if target_pair else "")
                 sanitized_chapter = target_display_char
-                source_text = state.previous_summary + target_display_char
+                extended_prev = sanitized_prev
+                source_text = extended_prev + target_display_char
+                if target_display_char:
+                    catalog = _load_word_catalog()
+                    source_prefix = source_text[:2] if len(source_text) >= 2 else ""
+                    history_pairs_source: Sequence[str] | None
+                    if round_pairs is not None:
+                        history_pairs_source = round_pairs
+                    else:
+                        history_pairs_source = getattr(self.environment, "_char_truth_pairs", None)
+                    if (
+                            source_prefix
+                            and len(source_prefix) == 2
+                            and source_prefix not in catalog
+                            and history_pairs_source
+                    ):
+                        history_pairs_list = list(history_pairs_source)
+                        search_index = min(step - 2, len(history_pairs_list) - 1)
+                        safety_counter = 0
+                        while (
+                                source_prefix
+                                and len(source_prefix) == 2
+                                and source_prefix not in catalog
+                                and search_index >= 0
+                                and safety_counter < self._char_history_extension_limit
+                        ):
+                            candidate_pair = history_pairs_list[search_index]
+                            search_index -= 1
+                            safety_counter += 1
+                            candidate_text = str(candidate_pair or "").strip()
+                            if not candidate_text:
+                                continue
+                            trailing_char = candidate_text[-1:]
+                            leading_char = candidate_text[:1]
+                            if not trailing_char or not leading_char:
+                                continue
+                            if extended_prev and not extended_prev.startswith(trailing_char):
+                                continue
+                            extended_prev = leading_char + extended_prev
+                            source_text = extended_prev + target_display_char
+                            source_prefix = source_text[:2] if len(source_text) >= 2 else ""
+                sanitized_prev = extended_prev
                 source_preview_text = source_text
             else:
                 sanitized_prev = state.previous_summary.replace("\n", "\\n")
@@ -3878,6 +3929,7 @@ def build_demo_components(
         char_pairs_per_round=char_pairs_per_round,
         character_teacher_interval=training_config["character_teacher_interval"],
         character_length_field_width=training_config.get("character_length_field_width", 1),
+        character_history_extension_limit=training_config.get("character_history_extension_limit", 16),
     )
     return agent, trainer
 
