@@ -1,6 +1,7 @@
 # 当前网络拓扑结构方案
 
 ## 策略网络 $\pi_\theta$
+- 观测拼接：字符模式下 tokens 由 prev + [<sep>] + chapter(目标字符) 组成，确保模型显式看到目标字符。
 - 结构：`TextPolicyNetwork` (`src/train_demo.py:2371-2525`) 使用共享字符词表。
   1. 嵌入层 $E \in \mathbb{R}^{|V|\times d_{\text{emb}}}$ 将 tokens 映射为向量。
   2. 编码 GRU（单向，hidden dim $d_h$）对输入序列执行 `pack_padded_sequence` 编码，得到上下文隐状态 $h^{\text{enc}}$。

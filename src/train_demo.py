@@ -2256,7 +2256,7 @@ class ArticleEnvironment:
                 self._char_history = ""
                 self._current_summary = ""
             initial_prev = self._current_summary[:1] if self._current_summary else ""
-            return TextObservation(initial_prev, "", 1)
+            return TextObservation(initial_prev, (self._char_targets[0] if self._char_targets else ""), 1)
         self._current_summary = self._capital.render_text(self._budget)
         return TextObservation(self._current_summary, self._chapters[0], 1)
 
@@ -2277,7 +2277,7 @@ class ArticleEnvironment:
             prev_summary_text = self._current_summary
         state = TextObservation(
             previous_summary=prev_summary_text,
-            chapter_text="" if self._iteration_mode == "character" else current_chapter,
+            chapter_text=(self._char_targets[0] if (self._iteration_mode == "character" and self._char_targets) else "") if self._iteration_mode == "character" else current_chapter,
             step_index=self._cursor + 1,
         )
         if self._iteration_mode == "character":
@@ -2460,14 +2460,14 @@ class ArticleEnvironment:
             next_prev = self._current_summary[:1] if self._iteration_mode == "character" else self._current_summary
             next_state = TextObservation(
                 previous_summary=next_prev,
-                chapter_text="" if self._iteration_mode == "character" else self._chapters[self._cursor],
+                chapter_text=(self._char_targets[self._cursor] if (self._iteration_mode == "character" and self._cursor < len(self._char_targets)) else self._chapters[self._cursor]),
                 step_index=self._cursor + 1,
             )
         else:
             next_prev = self._current_summary[:1] if self._iteration_mode == "character" else self._current_summary
             next_state = TextObservation(
                 previous_summary=next_prev,
-                chapter_text="",
+                chapter_text=(self._char_targets[0] if (self._iteration_mode == "character" and self._char_targets) else ""),
                 step_index=self._cursor + 1,
             )
         bigram_bonus_value = (
@@ -3349,7 +3349,7 @@ class DemoTrainer(Trainer):
                         self.environment.override_current_summary(truth_pair)
                     if hasattr(self.environment, "set_force_truth_pair"):
                         self.environment.set_force_truth_pair(True)
-                    state = TextObservation(truth_pair[:1], state.chapter_text, state.step_index)
+                    state = TextObservation(truth_pair[:1], (target_char or state.chapter_text), state.step_index)
                 else:
                     if hasattr(self.environment, "set_force_truth_pair"):
                         self.environment.set_force_truth_pair(False)
