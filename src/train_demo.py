@@ -2151,6 +2151,7 @@ class ArticleEnvironment:
             candidate_suffix = suffix_sequence[-2:]
         return candidate_suffix, suffix_sequence
 
+
     def _extend_raw_action_sequence(
             self,
             initial_char: str,
@@ -2179,14 +2180,21 @@ class ArticleEnvironment:
             annotation, matched_flag = _describe_word_catalog_annotation(segment)
             return segment, _normalize_annotation(annotation), matched_flag
 
+        def _trim_non_cjk(value: str) -> str:
+            trimmed = value
+            while trimmed and not _is_cjk(trimmed[-1]):
+                trimmed = trimmed[:-1]
+            return trimmed
+
         def _find_suffix(text_value: str) -> tuple[str, str, bool]:
-            if not text_value:
+            cleaned = _trim_non_cjk(text_value)
+            if not cleaned:
                 return "", "", False
-            max_len = min(len(text_value), 8)
+            max_len = min(len(cleaned), 8)
             fallback_segment = ""
             fallback_annotation = ""
             for length in range(max_len, 1, -1):
-                segment = text_value[-length:]
+                segment = cleaned[-length:]
                 if not all(_is_cjk(ch) for ch in segment):
                     continue
                 seg, ann, hit = _lookup_suffix(segment)
@@ -2196,7 +2204,7 @@ class ArticleEnvironment:
                     fallback_segment, fallback_annotation = seg, ann
             if not fallback_segment:
                 for length in range(max_len, 0, -1):
-                    segment = text_value[-length:]
+                    segment = cleaned[-length:]
                     if not all(_is_cjk(ch) for ch in segment):
                         continue
                     seg, ann, hit = _lookup_suffix(segment)
@@ -2210,7 +2218,7 @@ class ArticleEnvironment:
             if len(candidate) == 1 and char == candidate[0]:
                 return False
             candidate += char
-            suffix_segment, annotation_text, matched = _find_suffix(candidate[len(initial_char):])
+            suffix_segment, annotation_text, matched = _find_suffix(candidate)
             return matched and len(suffix_segment) >= 2
 
         for char in tail:
@@ -2222,7 +2230,7 @@ class ArticleEnvironment:
                 if _append_char(char):
                     break
 
-        suffix_segment, annotation_text, matched = _find_suffix(candidate[len(initial_char):])
+        suffix_segment, annotation_text, matched = _find_suffix(candidate)
         suffix_annotation = ""
         if suffix_segment:
             display_text = annotation_text if annotation_text else "未命中"
