@@ -1,4 +1,4 @@
-"""Run a text-conditioned SAC distillation demo for iterative summarization.
+﻿"""Run a text-conditioned SAC distillation demo for iterative summarization.
 
 The updated demonstration treats each chapter-length iteration as a single
 step whose observation consists of the full previous summary concatenated with
@@ -209,9 +209,9 @@ def _format_source_catalog_annotation(term: str) -> str:
         return annotation
     lookup = term.strip()
     if len(lookup) < 2:
+        return annotation
     best_annotation = ""
     for prefix_len in range(len(lookup), 1, -1):
-    for prefix_len in range(min(len(lookup), 8), 1, -1):
         prefix = lookup[:prefix_len]
         prefix_annotation, prefix_matched = _describe_word_catalog_annotation(prefix)
         if prefix_matched:
