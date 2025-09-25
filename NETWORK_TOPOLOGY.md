@@ -1,5 +1,78 @@
 # 当前网络拓扑结构方案
 
+## 字符模式拓扑规则
+记时刻 t：
+- prev = 上一轮摘要预览（取末尾 ≤1 字用于渲染与构造 source）；
+- chapter = 当前目标字符；
+- source = prev ⊕ chapter；
+- 词表 Catalog 包含 `data/chinese_name_frequency_word.json` 与 `data/chinese_frequency_word.json`；
+- 允许后缀长度集合 U = `data/word_length_sets.json.union.lengths`（例如 {2,3,4,5,6,7,8,9,10,11,13}）。
+
+1) 前缀左扩（保证 source 头两字命中）
+- 若 len(source)≥2 且 source[:2] 不在 Catalog，则沿“历史字符对”向左扩展 prev（每步把一个历史对的首字加到 prev 之前），至多 N=character_history_extension_limit 次；当 source[:2] 命中或达到 N 即停。
+
+伪代码：
+```pseudo
+function EXTEND_PREV_FOR_PREFIX_HIT(prev, chapter, history_pairs, N):
+    source = prev + chapter
+    if len(source) < 2: return prev
+    step = 0
+    while source[:2] not in Catalog and step < N and history_pairs.has_left(step):
+        pair = history_pairs.left(step)
+        if prev and not prev.startswith(pair.tail):
+            step += 1; continue
+        prev = pair.head + prev
+        source = prev + chapter
+        step += 1
+    return prev
+```
+
+2) raw_action 的后缀拓扑（去重首字，遇“有意义词”即停）
+- 初始为当前预测字符 c；若后续预测串出现以 c 开头的重复首字，则去重一次；
+- 按时间向前追加未来字符，形成候选串 q；
+- 对每一步的 q，在 U 中按降序枚举长度 L，若 q 的后缀 q[-L:] 在 Catalog 命中则停（把该后缀作为“有意义词”）；
+- 记录注记（包含来源词表与编号）。
+
+伪代码：
+```pseudo
+function EXTEND_RAW_ACTION_SUFFIX(initial_char, future_chars, U):
+    q = dedup_head_repeat(initial_char)
+    suffix, ann = "", ""
+    for ch in future_chars:
+        q += ch
+        for L in sort_desc(U ∩ [1..len(q)]):
+            seg = tail(q, L)
+            if is_cjk(seg) and in_catalog(seg):
+                return q, seg, annotate(seg)
+        if len(q) > max(U): continue
+    # 未命中时保留最长连续 CJK 片段作为回退
+    return q, longest_cjk_tail(q, max(U)), annotate_optional()
+```
+
+3) bigram 的前向拓扑（来自 raw_action 的扩展）
+- 以 base = chapter ⊕ raw_action 开始，按未来字符向前拓展；
+- 在每次拓展后，对 base 的后缀按 U 的降序判定命中；命中即停；
+- bigram 的注记显示“后缀命中”的词与词表来源。
+
+伪代码：
+```pseudo
+function FORWARD_EXTEND_BIGRAM(chapter, raw_action, future_chars, U):
+    s = chapter + raw_action
+    best = tail(s, min(2, len(s)))
+    for ch in future_chars:
+        s += ch
+        for L in sort_desc(U ∩ [1..len(s)]):
+            seg = tail(s, L)
+            if is_cjk(seg) and in_catalog(seg):
+                return seg, s
+    return best, s
+```
+
+备注：
+- 历史左扩的 N 由 `res/config.json`/`config_template.json` 的 `character_history_extension_limit`（默认 16）控制；
+- Catalog 命中采用“最长可用”优先；注记形如 `data/chinese_frequency_word.json#<id>`。
+
+
 ## 策略网络 $\pi_\theta$
 - 观测拼接：字符模式下 tokens 由 prev + [<sep>] + chapter(目标字符) 组成，确保模型显式看到目标字符。
 - 结构：`TextPolicyNetwork` (`src/train_demo.py:2371-2525`) 使用共享字符词表。

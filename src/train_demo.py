@@ -134,6 +134,23 @@ def _load_word_catalog() -> dict[str, list[tuple[str, str | None]]]:
 
 
 @lru_cache(maxsize=1)
+
+
+@lru_cache(maxsize=1)
+def _load_allowed_lengths() -> list[int]:
+    """Return allowed word lengths from data/word_length_sets.json (union.lengths)."""
+
+    path = DATA_DIR / "word_length_sets.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        raw = data.get("union", {}).get("lengths", [])
+        lengths: list[int] = sorted({int(x) for x in raw if isinstance(x, (int, float)) and int(x) > 0})
+        if lengths:
+            return lengths
+    except Exception:
+        pass
+    # Fallback: common lengths 2..8
+    return list(range(2, 9))
 def _load_character_bigram_reference() -> set[str]:
     pairs: set[str] = set()
     for path in CHARACTER_BIGRAM_REFERENCE_PATHS:
@@ -2143,10 +2160,18 @@ class ArticleEnvironment:
         suffix_sequence = base_bigram
         for future_char in self._collect_future_chars():
             suffix_sequence += future_char
-            if len(suffix_sequence) >= 2:
-                suffix_candidate = suffix_sequence[-2:]
-                if suffix_candidate in self._lexical_bigram_pairs:
-                    return suffix_candidate, suffix_sequence
+            cleaned = suffix_sequence
+            allowed = [L for L in _load_allowed_lengths() if L <= len(cleaned)]
+            allowed.sort(reverse=True)
+            for length in allowed:
+                segment = cleaned[-length:]
+                if not segment or not all(_is_cjk(ch) for ch in segment):
+                    continue
+                _seg, _ann, hit = _describe_word_catalog_annotation(segment)[0], *_describe_word_catalog_annotation(segment)[1:], False
+                # Use catalog membership via annotation check
+                ann, matched = _describe_word_catalog_annotation(segment)
+                if matched:
+                    return segment, suffix_sequence
         if len(suffix_sequence) >= 2:
             candidate_suffix = suffix_sequence[-2:]
         return candidate_suffix, suffix_sequence
@@ -2190,12 +2215,13 @@ class ArticleEnvironment:
             cleaned = _trim_non_cjk(text_value)
             if not cleaned:
                 return "", "", False
-            max_len = min(len(cleaned), 8)
+            allowed = [L for L in _load_allowed_lengths() if L <= len(cleaned)]
+            allowed.sort(reverse=True)
             fallback_segment = ""
             fallback_annotation = ""
-            for length in range(max_len, 1, -1):
+            for length in allowed:
                 segment = cleaned[-length:]
-                if not all(_is_cjk(ch) for ch in segment):
+                if not segment or not all(_is_cjk(ch) for ch in segment):
                     continue
                 seg, ann, hit = _lookup_suffix(segment)
                 if hit:
@@ -2203,13 +2229,16 @@ class ArticleEnvironment:
                 if not fallback_segment:
                     fallback_segment, fallback_annotation = seg, ann
             if not fallback_segment:
+                # As a last resort, take the longest contiguous CJK suffix within allowed window
+                max_len = min(len(cleaned), max(_load_allowed_lengths() or [2]))
                 for length in range(max_len, 0, -1):
                     segment = cleaned[-length:]
-                    if not all(_is_cjk(ch) for ch in segment):
+                    if not segment or not all(_is_cjk(ch) for ch in segment):
                         continue
                     seg, ann, hit = _lookup_suffix(segment)
                     return seg, ann, hit
             return fallback_segment, fallback_annotation, False
+
 
         def _append_char(char: str) -> bool:
             nonlocal candidate, suffix_segment, annotation_text, matched
@@ -2273,18 +2302,18 @@ class ArticleEnvironment:
         current_chapter = self._chapters[self._cursor]
         if self._iteration_mode == "character":
             prev_summary_text = self._current_summary[:1] if self._current_summary else ""
+            target_char = self._char_targets[self._cursor] if self._cursor < len(self._char_targets) else ""
         else:
             prev_summary_text = self._current_summary
+            target_char = current_chapter
         state = TextObservation(
             previous_summary=prev_summary_text,
-            chapter_text=(self._char_targets[0] if (self._iteration_mode == "character" and self._char_targets) else "") if self._iteration_mode == "character" else current_chapter,
+            chapter_text=(target_char if self._iteration_mode == "character" else current_chapter),
             step_index=self._cursor + 1,
         )
         if self._iteration_mode == "character":
-            target_char = self._char_targets[self._cursor] if self._cursor < len(self._char_targets) else ""
             source_text = state.previous_summary + target_char
         else:
-            target_char = current_chapter
             source_text = _combine_summary_and_chapter(
                 state.previous_summary, current_chapter
             )

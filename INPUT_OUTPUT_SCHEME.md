@@ -1,5 +1,30 @@
 # 当前输入-输出数据方案
 
+## 更新要点（需与代码保持一致）
+- 字符模式观测采用 prev + <sep> + chapter，其中 chapter=当前目标字符，不再为空串。
+- 历史回溯拓扑：在字符模式日志渲染中，若 `source=prev+chapter` 的前缀两字未命中词表，则沿“历史字符对”向左逐步扩展 prev，至多 16 次，直到前缀两字命中或达到上限。
+- 允许的后缀词长来源于 `data/word_length_sets.json` 的并集长度集合 `union.lengths`，用于 raw_action/bigram 的后缀命中判定。
+
+## 字符模式输入构成（prev+sep+chapter）
+设时刻 t 的观测为 O_t=(s_t, χ_t, i_t)，其中 χ_t 为当前目标字符。
+令编码器输出序列为
+  x_t = [<bos>] ⊕ clip(s_t) ⊕ [<sep>] ⊕ χ_t ⊕ [<eos>]
+并截断至 `max_observation_length`。
+
+伪代码：
+```pseudo
+function ENCODE_OBSERVATION(prev_summary, chapter_char):
+    tokens = [<bos>] + encode(prev_summary)
+    tokens += [<sep>] + encode(chapter_char) + [<eos>]
+    return clip(tokens, max_observation_length)
+```
+
+## 配置参数（与 res/config.json 同步）
+- character_history_extension_limit = 16
+  - 用于字符模式日志渲染时的“历史回溯拓扑”最大步数；达到阈值即停止左扩 prev。
+- iteration_granularity ∈ {chapter, paragraph, character}，字符模式时 `chapter_text` 即为目标字符。
+
+
 ## 状态与观测
 - 记忆状态 $C_t$ 由 `CognitiveCapital` 管理，预算 $B_t$ 为环境中的剩余成本额度。
 - 第 $t$ 步观测 $O_t = (s_t, \chi_t, i_t)$：$s_t = \sigma(C_{t-1}, B_{t-1})$ 来自 `CognitiveCapital.render_text`，$\chi_t$ 为章节文本或字符目标，$i_t$ 为游标索引。

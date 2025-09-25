@@ -120,3 +120,37 @@ function STEP_REWARD(state, operations, metrics, is_terminal):
 - `质量/语言/洁净组件`：`src/train_demo.py:2193-2212`。
 - `字符模式加成与 bigram 奖励`：`src/train_demo.py:2220-2266`。
 - `奖励写入与日志`：`ArticleEnvironment.step` 中 `src/train_demo.py:2142-2280`。
+## 字符模式加成与词法二元组（bigram）奖励（补充说明）
+在 `iteration_mode == "character"` 时，额外：
+\[
+ \chi_t = \max(0, Q_t + L_t)
+\]
+
+bigram 奖励基于“后缀命中”的可变长度词法集合 U（来自 `data/word_length_sets.json.union.lengths`）。设：
+- 预测首字为 c，raw_action 通过前向拓扑得到序列 q（去重首字，沿未来字符扩展，遇到 q 的后缀在 Catalog 命中即停，长度从 U 按降序尝试）。
+- bigram 候选串 s = chapter_char ⊕ q，经前向拓扑（与 raw_action 共用 U）在其后缀命中时给奖励。
+- 命中注记记录来源词表与编号，如 `data/chinese_frequency_word.json#236703`。
+- 若未命中但当前字符匹配教师目标字符，给降级奖励；否则为 0。
+
+形式化地：
+\[
+ \delta_t =
+ \begin{cases}
+ 1.0, & \exists L\in U,\ \mathrm{tail}(s, L)\in\text{Catalog},\\
+ 0.5, & \mathrm{tail}(s, 1)=\text{target\_char},\\
+ 0, & \text{otherwise}.
+ \end{cases}
+\]
+
+字符模式下：
+\[
+\begin{aligned}
+ B_t^{\text{char}} &= B_t + 0.5\,\chi_t + \delta_t,\\
+ \Delta_t^{\text{char}} &= \Delta_t + 0.25\,\chi_t.
+\end{aligned}
+\]
+
+实现要点（与日志一致）：
+- raw_action 显示形如：`raw_action=3 chars "他喃喃" (后缀"喃喃": data/chinese_frequency_word.json未命中)`。
+- bigram 显示形如：`bigram=4 chars "”他喃喃" (后缀"喃喃": data/chinese_frequency_word.json未命中)`。
+- `character_history_extension_limit=16` 控制“source 前缀两字命中”的左扩历史步数上限（只影响日志渲染与注记，不改变策略输入）。
