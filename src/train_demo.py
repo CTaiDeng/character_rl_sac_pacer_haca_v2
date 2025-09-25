@@ -168,12 +168,13 @@ def _reload_word_catalog_if_stale() -> None:
             pass
 
 
-def _format_word_catalog_annotation(term: str) -> str:
+
+def _describe_word_catalog_annotation(term: str) -> tuple[str, bool]:
     if term is None:
-        return ""
+        return "", False
     lookup = term.strip()
     if not lookup:
-        return ""
+        return "", False
     catalog = _load_word_catalog()
     label_order = [
         ("chinese_name_frequency_word.json", "data/chinese_name_frequency_word.json"),
@@ -183,20 +184,41 @@ def _format_word_catalog_annotation(term: str) -> str:
     for label, entry_id in catalog.get(lookup, []):
         if label not in label_to_id:
             continue
-        if label_to_id[label] is None:
-            label_to_id[label] = entry_id if entry_id is not None else ""
+        if label_to_id[label] is None and entry_id is not None:
+            label_to_id[label] = entry_id
     parts: list[str] = []
+    matched = False
     for label, display in label_order:
         entry_id = label_to_id[label]
-        if entry_id is None:
-            parts.append(f"{display}未命中")
-        elif entry_id == "":
-            parts.append(f"{display}命中(未编号)")
-        else:
+        if entry_id:
             parts.append(f"{display}#{entry_id}")
+            matched = True
+        else:
+            parts.append(f"{display}未命中")
     if not parts:
-        return ""
-    return " (" + "; ".join(parts) + ")"
+        return "", False
+    return " (" + "; ".join(parts) + ")", matched
+
+def _format_word_catalog_annotation(term: str) -> str:
+    annotation, _ = _describe_word_catalog_annotation(term)
+    return annotation
+
+def _format_source_catalog_annotation(term: str) -> str:
+    annotation, matched = _describe_word_catalog_annotation(term)
+    if matched or not term:
+        return annotation
+    lookup = term.strip()
+    if len(lookup) < 2:
+        return annotation
+    prefix = lookup[:2]
+    prefix_annotation, prefix_matched = _describe_word_catalog_annotation(prefix)
+    if not prefix_matched:
+        return annotation
+    if prefix_annotation.startswith(" (") and prefix_annotation.endswith(")"):
+        inner = prefix_annotation[2:-1]
+    else:
+        inner = prefix_annotation
+    return f' (前缀"{prefix}": {inner})'
 
 STEP_CSV_HEADERS = [
     "round",
@@ -3253,7 +3275,10 @@ class DemoTrainer(Trainer):
             stanza_lines.append(
                 f"           | chapter={chapter_len_str} chars \"{chapter_preview}\""
             )
-            source_annotation = _format_word_catalog_annotation(source_text)
+            if character_mode:
+                source_annotation = _format_source_catalog_annotation(source_text)
+            else:
+                source_annotation = _format_word_catalog_annotation(source_text)
             stanza_lines.append(
                 f"           | source={source_len_str} chars \"{source_preview}\"{source_annotation}"
             )
