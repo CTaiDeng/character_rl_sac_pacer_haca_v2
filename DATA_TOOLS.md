@@ -17,6 +17,15 @@
     - 前缀：`python -m data.catalog_lookup --prefix "精妙。如" --lengths 2,3,4`
     - 后缀：`python -m data.catalog_lookup --suffix "”他喃喃" --lengths 2,3,4`
 
+- JSONLINE 转结构化 JSON
+  - 文件：`data/jsonl_to_json.py`
+  - 作用：将若干 `*.jsonl` 文件（逐行 JSON）合并为结构化 JSON 数组并美化缩进（UTF-8）。
+  - 用法：
+    - 转单个文件：`python -m data.jsonl_to_json out/train_123/teacher_trajectory.jsonl`
+    - 批量（递归）：`python -m data.jsonl_to_json out --recursive`
+    - 覆盖已有输出：`python -m data.jsonl_to_json out --recursive --force`
+    - 控制缩进/ASCII：`python -m data.jsonl_to_json out --indent 2 --ascii`
+
 > 说明：
 > - `union.lengths` 被 `src/character_sac_trainer.py` 用作 raw_action/bigram 的可变长度后缀命中集合；
 > - `catalog_lookup.annotate` 统一了“命中/未命中#编号”的注记显示；
