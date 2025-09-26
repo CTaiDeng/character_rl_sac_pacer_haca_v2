@@ -83,11 +83,11 @@ STEP_LOG_PATH = RUN_DIR / STEP_LOG_FILENAME
 TRAIN_LOG_PATH = RUN_DIR / TRAIN_LOG_FILENAME
 
 # File path for supervised samples (JSONL) when using teacher in character mode
-TEACHER_SAMPLES_FILENAME = "teacher_samples.jsonl"
+TEACHER_SAMPLES_FILENAME = "teacher_samples.json"
 TEACHER_SAMPLES_PATH = RUN_DIR / TEACHER_SAMPLES_FILENAME
 
 # File path for RL dynamic trajectory (JSONL) when using teacher in character mode
-TEACHER_TRAJECTORY_FILENAME = "teacher_trajectory.jsonl"
+TEACHER_TRAJECTORY_FILENAME = "teacher_trajectory.json"
 TEACHER_TRAJECTORY_PATH = RUN_DIR / TEACHER_TRAJECTORY_FILENAME
 CONFIG_TEMPLATE_PATH = REPO_ROOT / "config_template.json"
 CONFIG_OVERRIDE_PATH = REPO_ROOT / "res" / "config.json"
@@ -3326,6 +3326,9 @@ class DemoTrainer(Trainer):
         self._character_teacher_interval = max(0, character_teacher_interval)
         self._char_length_field_width = max(1, character_length_field_width)
         self._char_history_extension_limit = max(0, int(character_history_extension_limit))
+        # JSON buffers for structured outputs
+        self._teacher_samples_buffer: list[dict[str, Any]] = []
+        self._teacher_traj_buffer: list[dict[str, Any]] = []
 
     def _format_length(self, length: int, character_mode: bool) -> str:
         if character_mode:
@@ -3525,7 +3528,7 @@ class DemoTrainer(Trainer):
                     reference_text = state.chapter_text
                 action = _create_text_action(reference_text, self.agent.tokenizer)
                 stanza_lines.append("           | action_source=teacher")
-                # 写入监督学习样本（JSONL），仅字符模式下记录 输入->输出
+                # 写入监督学习样本（JSONL），字符模式记录“输入→输出”（下一字符）
                 if character_mode:
                     try:
                         input_obj = {
@@ -3548,9 +3551,10 @@ class DemoTrainer(Trainer):
                             "output": output_obj,
                             "timestamp": int(time.time() * 1000),
                         }
-                        TEACHER_SAMPLES_PATH.parent.mkdir(parents=True, exist_ok=True)
-                        with TEACHER_SAMPLES_PATH.open("a", encoding="utf-8") as fp:
-                            fp.write(json.dumps(sample, ensure_ascii=False) + "\n")
+                        # 缓存于内存，训练轮结束统一写入结构化 JSON
+                        if not hasattr(self, "_teacher_samples_buffer"):
+                            self._teacher_samples_buffer = []  # type: ignore[attr-defined]
+                        self._teacher_samples_buffer.append(sample)  # type: ignore[attr-defined]
                     except Exception:
                         pass
             elif use_reference:
@@ -3597,8 +3601,30 @@ class DemoTrainer(Trainer):
                         },
                         "action": {
                             "y": str(action_char),
+                            "raw_action_sequence": metrics.get("raw_action_sequence", ""),
+                            "raw_action_suffix": metrics.get("raw_action_suffix", ""),
+                            "raw_action_suffix_annotation": metrics.get("raw_action_suffix_annotation", ""),
+                            "lexical_bigram_candidate": metrics.get("lexical_bigram_candidate", ""),
+                            "lexical_bigram_bonus": metrics.get("lexical_bigram_bonus", 0.0),
+                            "lexical_bigram_sources": metrics.get("lexical_bigram_sources", ""),
                         },
                         "reward": float(transition.reward),
+                        "reward_components": {
+                            "base": float(metrics.get("reward_base", 0.0)),
+                            "potential": float(metrics.get("reward_potential_gain", 0.0)),
+                            "soft": float(metrics.get("reward_soft_bonus", 0.0)),
+                        },
+                        "metrics": {
+                            "similarity": metrics.get("similarity", 0.0),
+                            "coverage_ratio": metrics.get("coverage_ratio", 0.0),
+                            "novelty_ratio": metrics.get("novelty_ratio", 0.0),
+                            "lexical_cosine": metrics.get("lexical_cosine", 0.0),
+                            "lexical_js_similarity": metrics.get("lexical_js_similarity", 0.0),
+                            "garbled_ratio": metrics.get("garbled_ratio", 0.0),
+                            "word_noncompliance_ratio": metrics.get("word_noncompliance_ratio", 0.0),
+                            "capital_value": metrics.get("capital_value", 0.0),
+                            "operation_cost": metrics.get("operation_cost", 0.0),
+                        },
                         "next": {
                             "prev": next_prev_char,
                             "chapter": next_chapter_char,
@@ -3606,9 +3632,10 @@ class DemoTrainer(Trainer):
                         },
                         "timestamp": int(time.time() * 1000),
                     }
-                    TEACHER_TRAJECTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-                    with TEACHER_TRAJECTORY_PATH.open("a", encoding="utf-8") as fp:
-                        fp.write(json.dumps(traj, ensure_ascii=False) + "\n")
+                    # 缓存于内存，训练轮结束统一写入结构化 JSON
+                    if not hasattr(self, "_teacher_traj_buffer"):
+                        self._teacher_traj_buffer = []  # type: ignore[attr-defined]
+                    self._teacher_traj_buffer.append(traj)  # type: ignore[attr-defined]
                 except Exception:
                     pass
 
@@ -3882,6 +3909,30 @@ class DemoTrainer(Trainer):
                         f"{key}={value:.4f}" for key, value in aggregated.items()
                     )
                 )
+        # Flush structured JSON outputs for this round
+        try:
+            self.flush_json_outputs()
+        except Exception:
+            pass
+
+    def flush_json_outputs(self) -> None:
+        """Write buffered teacher samples and trajectories as structured JSON arrays."""
+        try:
+            data = list(getattr(self, "_teacher_samples_buffer", []))
+            TEACHER_SAMPLES_PATH.parent.mkdir(parents=True, exist_ok=True)
+            TEACHER_SAMPLES_PATH.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+        try:
+            traj = list(getattr(self, "_teacher_traj_buffer", []))
+            TEACHER_TRAJECTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+            TEACHER_TRAJECTORY_PATH.write_text(
+                json.dumps(traj, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
 
     def render_iterative_summary(self) -> List[str]:
         """Render iterative capital accrual generated by the deterministic policy."""
@@ -4410,6 +4461,11 @@ def main() -> None:
     )
     for round_index in range(1, max(1, args.rounds) + 1):
         trainer.run(round_index=round_index)
+        # Persist structured JSON outputs after each round
+        try:
+            trainer.flush_json_outputs()
+        except Exception:
+            pass
 
     step_rows = _read_csv_rows(STEP_CSV_PATH)
     round_rows = _read_csv_rows(ROUND_CSV_PATH)
