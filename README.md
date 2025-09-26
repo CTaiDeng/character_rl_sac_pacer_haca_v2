@@ -156,3 +156,21 @@ After the log finishes, the script 会首先清理旧的 CSV/HTML 产物，并�
 
 仓库同时提供 `visualizations/training_metrics.html`，可通过浏览器读取上述 CSV 并基于 Chart.js 绘制折线/柱状图。推荐在仓库根目录执行 `python -m http.server` 后，访问 `http://localhost:8000/visualizations/training_metrics.html`，即可看到 Step 与 Round 奖励的走势；若 CSV 文件缺失或为空，页面会给出相应提示。若想脱离静态服务器快速查看结果，也可以直接打开自动生成的 `out/rewards.html`，该文件已经内嵌 Chart.js 并包含最新奖励摘要。
 
+## 数据工具（Data utilities）
+
+- 输入-输出-打分映射（JSON 模式）
+  - 文件：`data/io_score_mapping.json`
+  - 含义：定义最小映射 schema（input/output/score）与示例，可供脚本/服务按统一 schema 记录或消费。
+
+- 生成词长集合（用于可变长度后缀命中）
+  - 脚本：`python -m data.gen_word_length_sets`
+  - 输出：`data/word_length_sets.json`，包含 names/freq/union 三块长度集合与去重计数。
+
+- 词表命中查询（供代码与 CLI 使用）
+  - 模块：`data/catalog_lookup.py`（可 `from data import catalog_lookup`）
+  - 接口：`load_catalog()`、`annotate(term)`、`longest_prefix_hit(text,lengths)`、`suffix_hit(text,lengths)`
+  - CLI 示例：
+    - 标注：`python -m data.catalog_lookup --query "精妙"`
+    - 前缀：`python -m data.catalog_lookup --prefix "精妙。如" --lengths 2,3,4`
+    - 后缀：`python -m data.catalog_lookup --suffix "”他喃喃" --lengths 2,3,4`
+

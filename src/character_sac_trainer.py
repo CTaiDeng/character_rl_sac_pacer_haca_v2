@@ -81,6 +81,10 @@ REWARDS_HTML_PATH = RUN_DIR / REWARDS_HTML_FILENAME
 ROUND_SNAPSHOT_DIR = RUN_DIR / ROUND_SNAPSHOT_DIRNAME
 STEP_LOG_PATH = RUN_DIR / STEP_LOG_FILENAME
 TRAIN_LOG_PATH = RUN_DIR / TRAIN_LOG_FILENAME
+
+# File path for supervised samples (JSONL) when using teacher in character mode
+TEACHER_SAMPLES_FILENAME = "teacher_samples.jsonl"
+TEACHER_SAMPLES_PATH = RUN_DIR / TEACHER_SAMPLES_FILENAME
 CONFIG_TEMPLATE_PATH = REPO_ROOT / "config_template.json"
 CONFIG_OVERRIDE_PATH = REPO_ROOT / "res" / "config.json"
 DATA_DIR = REPO_ROOT / "data"
@@ -453,6 +457,9 @@ def _configure_run_paths(run_dir: Path) -> None:
     ROUND_SNAPSHOT_DIR = RUN_DIR / ROUND_SNAPSHOT_DIRNAME
     STEP_LOG_PATH = RUN_DIR / STEP_LOG_FILENAME
     TRAIN_LOG_PATH = RUN_DIR / TRAIN_LOG_FILENAME
+    # Update teacher samples path per run directory
+    global TEACHER_SAMPLES_PATH
+    TEACHER_SAMPLES_PATH = RUN_DIR / TEACHER_SAMPLES_FILENAME
 
 
 def _initialize_run_paths() -> Path:
@@ -3511,6 +3518,34 @@ class DemoTrainer(Trainer):
                     reference_text = state.chapter_text
                 action = _create_text_action(reference_text, self.agent.tokenizer)
                 stanza_lines.append("           | action_source=teacher")
+                # 写入监督学习样本（JSONL），仅字符模式下记录 输入->输出
+                if character_mode:
+                    try:
+                        input_obj = {
+                            "prev": str(sanitized_prev),
+                            "chapter": str(sanitized_chapter),
+                            "source": str(source_text),
+                            "x": f"{sanitized_prev}<sep>{sanitized_chapter}",
+                            "mode": "character",
+                        }
+                        output_obj = {
+                            # 输出为下一字符（若可得），否则回退到参考文本首字
+                            "y": str(next_char or (reference_text[:1] if reference_text else "")),
+                            "target_char": str(target_char or ""),
+                        }
+                        sample = {
+                            "round": int(round_index),
+                            "step": int(step),
+                            "global_step": int(global_step),
+                            "input": input_obj,
+                            "output": output_obj,
+                            "timestamp": int(time.time() * 1000),
+                        }
+                        TEACHER_SAMPLES_PATH.parent.mkdir(parents=True, exist_ok=True)
+                        with TEACHER_SAMPLES_PATH.open("a", encoding="utf-8") as fp:
+                            fp.write(json.dumps(sample, ensure_ascii=False) + "\n")
+                    except Exception:
+                        pass
             elif use_reference:
                 reference_text = self._reference_actions[state.step_index]
                 action = _create_text_action(reference_text, self.agent.tokenizer)
