@@ -240,6 +240,44 @@ def _format_source_catalog_annotation(term: str) -> str:
             break
     return best_annotation or annotation
 
+# 覆盖：统一词表注记（优先调用 data.catalog_lookup.annotate）
+def _describe_word_catalog_annotation(term: str) -> tuple[str, bool]:
+    if term is None:
+        return "", False
+    lookup = term.strip()
+    if not lookup:
+        return "", False
+    try:
+        from data import catalog_lookup as _catalog_lookup  # type: ignore
+        annotation, matched = _catalog_lookup.annotate(lookup)
+        if annotation:
+            return annotation, bool(matched)
+    except Exception:
+        pass
+    catalog = _load_word_catalog()
+    label_order = [
+        ("chinese_name_frequency_word.json", "data/chinese_name_frequency_word.json"),
+        ("chinese_frequency_word.json", "data/chinese_frequency_word.json"),
+    ]
+    label_to_id: dict[str, str | None] = {label: None for label, _display in label_order}
+    for label, entry_id in catalog.get(lookup, []):
+        if label not in label_to_id:
+            continue
+        if label_to_id[label] is None and entry_id is not None:
+            label_to_id[label] = entry_id
+    parts: list[str] = []
+    matched = False
+    for label, display in label_order:
+        entry_id = label_to_id[label]
+        if entry_id:
+            parts.append(f"{display}#{entry_id}")
+            matched = True
+        else:
+            parts.append(f"{display}未命中")
+    if not parts:
+        return "", False
+    return " (" + "; ".join(parts) + ")", matched
+
 STEP_CSV_HEADERS = [
     "round",
     "step",

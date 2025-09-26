@@ -36,7 +36,7 @@ This workflow mirrors the intended usage within data ingestion pipelines, ensuri
 
 ### Inspecting chapter previews and quality metrics
 
-The demo now works纯文本输入，可以利用 `src.train_demo.analyze_summary` 检查摘要与章节之间的长度比例、语义相似度以及新颖度。示例脚本如下：
+The demo now works纯文本输入，可以利用 `src.character_sac_trainer.analyze_summary` 检查摘要与章节之间的长度比例、语义相似度以及新颖度。示例脚本如下：
 
 ```python
 from pathlib import Path
@@ -45,7 +45,7 @@ DELIMITER = "[----------------------------------------------------->"
 article = Path("data/sample_article.txt").read_text(encoding="utf-8")
 chapters = [chunk.strip() for chunk in article.split(DELIMITER) if chunk.strip()]
 
-from src.train_demo import (
+from src.character_sac_trainer import (
     ArticleEnvironment,
     CharTokenizer,
     analyze_summary,
@@ -82,7 +82,7 @@ for index, chapter in enumerate(chapters, start=1):
 
 ## Demo training run
 
-The repository ships with a `train_demo.py` module under `src/` that wires together the replay buffer, agent, and trainer scaffolding using a toy environment constructed from the sample article statistics and iterative distillation summaries.
+The repository ships with a `character_sac_trainer.py` module under `src/` that wires together the replay buffer, agent, and trainer scaffolding using a toy environment constructed from the sample article statistics and iterative distillation summaries.
 
 ### Dependencies
 
@@ -103,7 +103,7 @@ Execute the module from the repository root. Ensure `src/` is available on `PYTH
 ```bash
 PYTHONPATH=src python -m train_demo --rounds 3
 # or, thanks to the `src/__init__.py` package initializer:
-python -m src.train_demo --rounds 3
+python -m src.character_sac_trainer --rounds 3
 ```
 
 每轮训练固定遍历 `data/sample_article.txt` 的全部 76 个分割片段，因此每个迭代（iteration）恰好对应一次环境 step，`--rounds` 仅控制重复轮次（默认 1000 轮）。脚本会在完成 76 个交互后集中执行一批 SAC 更新，数量与步骤数一致，从而模拟“先收集一整轮经验，再统一回放训练”的节奏。需要缩减或扩充集中训练的强度时，可以通过 `--post-round-updates` 覆盖默认值；`--replay-capacity` 则依旧决定演示缓冲区能保留多少过往转换。针对快速冒烟测试，还可以附加 `--max-chapters 2`（或任意正整数）限制每轮使用的章节数量，从而在几次 step 内观察完整的日志与训练流程。
@@ -155,3 +155,4 @@ After the log finishes, the script 会首先清理旧的 CSV/HTML 产物，并�
 * `out/round_metrics.csv`：每轮训练完成时的汇总分数，记录当轮 step 数 (`steps`)、总奖励 (`total_reward`) 与平均奖励 (`average_reward`)。
 
 仓库同时提供 `visualizations/training_metrics.html`，可通过浏览器读取上述 CSV 并基于 Chart.js 绘制折线/柱状图。推荐在仓库根目录执行 `python -m http.server` 后，访问 `http://localhost:8000/visualizations/training_metrics.html`，即可看到 Step 与 Round 奖励的走势；若 CSV 文件缺失或为空，页面会给出相应提示。若想脱离静态服务器快速查看结果，也可以直接打开自动生成的 `out/rewards.html`，该文件已经内嵌 Chart.js 并包含最新奖励摘要。
+

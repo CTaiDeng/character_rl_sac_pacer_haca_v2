@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "description": "字符模式下 输入→输出→打分 的最小映射。input 为观测(prev+sep+chapter)的关键字段，output 为策略首步动作(或 canonical_summary)，score 为奖励与组成分。",
+  "schema": {
+    "input": {
+      "prev": "string, 上一摘要预览(≤1字)",
+      "chapter": "string, 目标字符",
+      "source": "string, prev+chapter (仅用于记录/渲染)"
+    },
+    "output": {
+      "action_text": "string, 策略输出文本(字符模式仅首字参与 bigram)"
+    },
+    "score": {
+      "reward": "number, 总奖励",
+      "components": {
+        "base": "number",
+        "potential": "number",
+        "soft": "number",
+        "lexical": "number"
+      }
+    }
+  },
+  "examples": [
+    {
+      "input": {"prev": "精", "chapter": "妙", "source": "精妙"},
+      "output": {"action_text": "。"},
+      "score": {
+        "reward": 2.529225,
+        "components": {"base": 1.436921, "potential": 0.218461, "soft": 0.873843, "lexical": 1.0}
+      }
+    }
+  ]
+}
+

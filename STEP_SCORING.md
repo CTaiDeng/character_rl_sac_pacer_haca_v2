@@ -19,7 +19,7 @@
 其中 $\beta = \texttt{BUDGET\_PENALTY\_WEIGHT} = 0.02$。当 episode 结束时，成本惩罚改为 $\lambda_t = \omega_c \, \bar c_t$，否则 $\lambda_t = \omega_c \, c_t$，权重 $\omega_c = \texttt{COST\_WEIGHT} = 0.08$。
 
 ## 认知资本估值
-`CapitalValuator` 在 `src/train_demo.py:1074` 起定义：
+`CapitalValuator` 在 `src/character_sac_trainer.py:1074` 起定义：
 \[
 \begin{aligned}
  \mathrm{coverage}_t &= \frac{\bigl|\bigcup_{f\in F_t} T(f)\bigr|}{\bigl|\bigcup_{p\in\mathcal{P}} T(p)\bigr|},\\
@@ -62,7 +62,7 @@
  0, & \text{否则},
  \end{cases}
 \]
-其中 `match` 表示预测首字符等于教师目标字符，bigram 为 `chapter_char + raw_action_char`，构建逻辑见 `src/train_demo.py:2234-2264`。该模式下
+其中 `match` 表示预测首字符等于教师目标字符，bigram 为 `chapter_char + raw_action_char`，构建逻辑见 `src/character_sac_trainer.py:2234-2264`。该模式下
 \[
 \begin{aligned}
  B_t^{\text{char}} &= B_t + 0.5\,\chi_t + \delta_t,\\
@@ -71,7 +71,7 @@
 \]
 
 ## Step 奖励合成
-综合 `src/train_demo.py:2181-2268`：
+综合 `src/character_sac_trainer.py:2181-2268`：
 \[
  R_t = V(C_t) - \lambda_t - \psi_t + S_t +
  \begin{cases}
@@ -115,11 +115,11 @@ function STEP_REWARD(state, operations, metrics, is_terminal):
 ```
 
 ## 实现映射
-- `操作成本与预算`：`src/train_demo.py:2147-2179`，`OPERATION_COSTS` 定义于 `src/train_demo.py:421-428`。
-- `认知资本估值`：`CognitiveCapital` 与 `CapitalValuator` 定义于 `src/train_demo.py:959-1179`。
-- `质量/语言/洁净组件`：`src/train_demo.py:2193-2212`。
-- `字符模式加成与 bigram 奖励`：`src/train_demo.py:2220-2266`。
-- `奖励写入与日志`：`ArticleEnvironment.step` 中 `src/train_demo.py:2142-2280`。
+- `操作成本与预算`：`src/character_sac_trainer.py:2147-2179`，`OPERATION_COSTS` 定义于 `src/character_sac_trainer.py:421-428`。
+- `认知资本估值`：`CognitiveCapital` 与 `CapitalValuator` 定义于 `src/character_sac_trainer.py:959-1179`。
+- `质量/语言/洁净组件`：`src/character_sac_trainer.py:2193-2212`。
+- `字符模式加成与 bigram 奖励`：`src/character_sac_trainer.py:2220-2266`。
+- `奖励写入与日志`：`ArticleEnvironment.step` 中 `src/character_sac_trainer.py:2142-2280`。
 ## 字符模式加成与词法二元组（bigram）奖励（补充说明）
 在 `iteration_mode == "character"` 时，额外：
 \[
@@ -154,3 +154,4 @@ bigram 奖励基于“后缀命中”的可变长度词法集合 U（来自 `dat
 - raw_action 显示形如：`raw_action=3 chars "他喃喃" (后缀"喃喃": data/chinese_frequency_word.json未命中)`。
 - bigram 显示形如：`bigram=4 chars "”他喃喃" (后缀"喃喃": data/chinese_frequency_word.json未命中)`。
 - `character_history_extension_limit=16` 控制“source 前缀两字命中”的左扩历史步数上限（只影响日志渲染与注记，不改变策略输入）。
+
