@@ -1,4 +1,4 @@
-# 当前输入-输出数据方案
+﻿# 当前输入-输出数据方案
 
 ## 更新要点（需与代码保持一致）
 - 字符模式观测采用 prev + <sep> + chapter，其中 chapter=当前目标字符，不再为空串。
@@ -101,3 +101,4 @@ function ENV_STEP(state, policy, tokenizer, replay_buffer):
 - 环境核心逻辑：`ArticleEnvironment.step`，见 `src/character_sac_trainer.py`。
 - 度量与日志：`analyze_summary`、`_write_rewards_dashboard`，见 `src/character_sac_trainer.py`。
 - 经验缓冲：`SimpleReplayBuffer`，见 `src/character_sac_trainer.py`。
+

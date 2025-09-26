@@ -1,4 +1,4 @@
-# 当前 Step 打分方案
+﻿# 当前 Step 打分方案
 
 ## 符号约定
 - $C_t = (F_t, L_t, V_t, H_t)$ 表示第 $t$ 步的认知资本，分别存储事实、链接、已验证事实、已对冲事实。
@@ -152,4 +152,5 @@ $$
 - raw_action 显示形如：$\texttt{raw\_action=3 chars "他喃喃" (后缀"喃喃": data/chinese\_frequency\_word.json未命中)}$。
 - bigram 显示形如：$\texttt{bigram=4 chars "”他喃喃" (后缀"喃喃": data/chinese\_frequency\_word.json未命中)}$。
 - $\texttt{character\_history\_extension\_limit=16}$ 控制“source 前缀两字命中”的左扩历史步数上限（只影响日志渲染与注记，不改变策略输入）。
+
 

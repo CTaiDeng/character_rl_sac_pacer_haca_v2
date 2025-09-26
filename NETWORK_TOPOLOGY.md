@@ -1,4 +1,4 @@
-# 当前网络拓扑结构方案
+﻿# 当前网络拓扑结构方案
 
 ## 字符模式拓扑规则
 记时刻 t：
@@ -163,3 +163,4 @@ function UPDATE(agent):
 - 价值网络与工厂：`TextQNetwork`、`DemoNetworkFactory`，见 `src/character_sac_trainer.py`。
 - SAC 代理与更新逻辑：`DemoSACAgent`，见 `src/character_sac_trainer.py`。
 - 超参数常量：见 `src/character_sac_trainer.py`。
+
