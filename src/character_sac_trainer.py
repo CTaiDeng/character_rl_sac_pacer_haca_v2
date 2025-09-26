@@ -85,6 +85,10 @@ TRAIN_LOG_PATH = RUN_DIR / TRAIN_LOG_FILENAME
 # File path for supervised samples (JSONL) when using teacher in character mode
 TEACHER_SAMPLES_FILENAME = "teacher_samples.jsonl"
 TEACHER_SAMPLES_PATH = RUN_DIR / TEACHER_SAMPLES_FILENAME
+
+# File path for RL dynamic trajectory (JSONL) when using teacher in character mode
+TEACHER_TRAJECTORY_FILENAME = "teacher_trajectory.jsonl"
+TEACHER_TRAJECTORY_PATH = RUN_DIR / TEACHER_TRAJECTORY_FILENAME
 CONFIG_TEMPLATE_PATH = REPO_ROOT / "config_template.json"
 CONFIG_OVERRIDE_PATH = REPO_ROOT / "res" / "config.json"
 DATA_DIR = REPO_ROOT / "data"
@@ -460,6 +464,9 @@ def _configure_run_paths(run_dir: Path) -> None:
     # Update teacher samples path per run directory
     global TEACHER_SAMPLES_PATH
     TEACHER_SAMPLES_PATH = RUN_DIR / TEACHER_SAMPLES_FILENAME
+    # Update teacher trajectory path per run directory
+    global TEACHER_TRAJECTORY_PATH
+    TEACHER_TRAJECTORY_PATH = RUN_DIR / TEACHER_TRAJECTORY_FILENAME
 
 
 def _initialize_run_paths() -> Path:
@@ -3559,6 +3566,51 @@ class DemoTrainer(Trainer):
             transition = self.environment.step(action)
             self.agent.record(transition)
             metrics = self.environment.last_metrics
+
+            # 当使用 teacher 且字符模式时，追加一条 RL 动态最优路径的轨迹样本（JSONL）
+            if character_mode and use_teacher:
+                try:
+                    # 当前输入（动作前）
+                    x_str = f"{sanitized_prev}<sep>{sanitized_chapter}"
+                    action_char = (next_char or (reference_text[:1] if reference_text else ""))
+
+                    # 估计下一步输入（动作后）
+                    env_current_summary = str(getattr(self.environment, "_current_summary", ""))
+                    env_cursor = int(getattr(self.environment, "_cursor", 0))
+                    all_targets = list(getattr(self.environment, "_char_targets", []))
+                    next_prev_char = env_current_summary[:1]
+                    next_chapter_char = ""
+                    if 0 <= env_cursor < len(all_targets):
+                        next_chapter_char = all_targets[env_cursor]
+                    x_next = f"{next_prev_char}<sep>{next_chapter_char}"
+
+                    traj = {
+                        "round": int(round_index),
+                        "step": int(step),
+                        "global_step": int(global_step),
+                        "input": {
+                            "prev": str(sanitized_prev),
+                            "chapter": str(sanitized_chapter),
+                            "source": str(source_text),
+                            "x": x_str,
+                            "mode": "character",
+                        },
+                        "action": {
+                            "y": str(action_char),
+                        },
+                        "reward": float(transition.reward),
+                        "next": {
+                            "prev": next_prev_char,
+                            "chapter": next_chapter_char,
+                            "x": x_next,
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                    TEACHER_TRAJECTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+                    with TEACHER_TRAJECTORY_PATH.open("a", encoding="utf-8") as fp:
+                        fp.write(json.dumps(traj, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
 
             canonical_summary_text = metrics.get("canonical_summary_text", action.text)
             raw_action_sequence = metrics.get("raw_action_sequence", action.text)
