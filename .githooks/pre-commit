@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Normalize changed Markdown files, then sync README index
+# Normalize changed Markdown files, align titles, then sync README index
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -12,21 +12,24 @@ command -v "$PY" >/dev/null 2>&1 || PY=python3
 changed_md=( $(git diff --cached --name-only --diff-filter=ACMRTUXB | grep -E '\.md$' || true) )
 
 if [ ${#changed_md[@]} -gt 0 ]; then
-  echo "[pre-commit] 正在规范化 Markdown：${changed_md[*]}"
+  echo "[pre-commit] 规范化 Markdown: ${changed_md[*]}"
   "$PY" scripts/md_normalize.py "${changed_md[@]}" || true
+  echo "[pre-commit] 校验/对齐 docs 标题 = 文件名"
+  "$PY" scripts/ensure_title_equals_filename.py "${changed_md[@]}" || true
 fi
 
-echo "[pre-commit] 同步 README 文档摘要索引"
+echo "[pre-commit] 同步 README 文末 docs 摘要索引"
 "$PY" scripts/update_readme_index.py || true
 
-# 清理临时文件，避免误提交
+# 清理临时文件，避免被提交
 rm -f out_prev_readme.txt 2>/dev/null || true
 rm -f out_block.txt 2>/dev/null || true
 
-# 重新添加可能被脚本修改的文件
+# 将可能被脚本改动的文件重新加入暂存区
 git add README.md || true
 if [ ${#changed_md[@]} -gt 0 ]; then
   git add "${changed_md[@]}" || true
 fi
 
 exit 0
+
