@@ -17,6 +17,22 @@
 - 禁止维护 `docs/SUMMARIES.md` 等独立摘要清单，避免三方不同步。
 - 文档编码统一为 UTF‑8（带 BOM），以减少跨平台显示乱码。
 
+## 文档对齐指令与整理流程（docs/*）
+
+- 目标：将 `docs` 知识库的文章统一成“文件名前缀为入库时间戳（秒）”，并在文档主标题下方写入对应日期（YYYY‑MM‑DD）。
+- 时间戳前缀重写：以 git 首次入库时间为准（`git log --diff-filter=A --follow --format=%at -n 1 <file>`），仅处理匹配 `^\d+_.*\.md$` 的文件。
+- 日期写入规则：
+  - 位置：文档首个标题（以 `#` 开头）之后一行；
+  - 形式：`日期：YYYY-MM-DD`；
+  - 若该位置已有“日期：”行，则就地更新。
+- 对齐指令入口：`python scripts/align_docs.py`
+  - 依次执行：
+    1) `scripts/rename_docs_to_git_ts.py`（重写时间戳前缀）；
+    2) `scripts/insert_doc_date_from_prefix.py`（写入/更新日期行）；
+    3) `scripts/update_readme_index.py`（重建 README 文末索引）；
+    4) `scripts/md_normalize.py`（对 README 与 docs 做 Markdown 规范化）。
+- 触发时机：新增/重命名文档后，或批量文档迁移后，执行一次对齐指令；PR 合并前建议手动执行并提交。
+
 ## Markdown 规范（数学/代码格式实时审查）
 
 ```
