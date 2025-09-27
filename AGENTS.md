@@ -54,6 +54,7 @@
 
 - 禁止将临时/对比用产物纳入版本库，提交前需清理：
   - `out_prev_readme.txt`（对比 README 旧版本时产生的临时文件）。
+  - `out_block.txt`（导出 README 摘要索引块用于排查时产生的临时文件）。
 - `.gitignore` 已忽略上述文件；预提交钩子会在提交前自动删除该文件。
 
 ## 数据目录维护规范
@@ -61,4 +62,3 @@
 - 在 `data/` 目录新增、删除、重命名文件（含脚本与数据集）时，必须同步更新 `data/README.md` 中的清单、分类与用途说明。
 - 若 `data/word_length_sets.json.union.lengths` 或示例语料的结构/分隔符发生变更，需同步更新相关设计文档与本清单的“生成物与来源”说明。
 - 涉及 CLI 的脚本（如 `catalog_lookup.py`、`gen_word_length_sets.py`、`jsonl_to_json.py`）应在 `data/README.md` 中给出最小可用示例命令。
-

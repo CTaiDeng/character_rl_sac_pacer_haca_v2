@@ -21,6 +21,7 @@ echo "[pre-commit] 同步 README 文档摘要索引"
 
 # 清理临时文件，避免误提交
 rm -f out_prev_readme.txt 2>/dev/null || true
+rm -f out_block.txt 2>/dev/null || true
 
 # 重新添加可能被脚本修改的文件
 git add README.md || true

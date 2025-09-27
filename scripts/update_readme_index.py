@@ -112,8 +112,12 @@ def build_index_block(items: List[Tuple[str, str]]) -> str:
     lines: List[str] = []
     lines.append('## 文档摘要索引')
     lines.append(START_MARK)
+    def _escape_texttt(s: str) -> str:
+        return s.replace("_", r"\_")
+
     for rel_path, summary in items:
-        lines.append(f"- `{rel_path}`")
+        # 使用数学打字体以符合仓库 Markdown 规范（而非反引号），并转义下划线
+        lines.append(f"- $\\texttt{{{_escape_texttt(rel_path)}}}$")
         lines.append(f"  - 摘要：{summary}")
     lines.append(END_MARK)
     return '\n'.join(lines) + '\n'
