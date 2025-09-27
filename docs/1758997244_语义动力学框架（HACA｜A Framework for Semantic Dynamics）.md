@@ -1,4 +1,4 @@
-﻿# 语义动力学框架（A Framework for Semantic Dynamics）
+﻿# 语义动力学框架（HACA｜A Framework for Semantic Dynamics）
 日期：2025-09-28
 
 
