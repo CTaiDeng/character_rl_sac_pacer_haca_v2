@@ -1,12 +1,12 @@
-# 摘要迭代样板
+﻿# 摘要迭代样板
 
 > 用于强化学习演示的参考答案，示例范围覆盖终局阶段若干章节。可稀疏加入训练缓冲区，为策略提供高质量启发。
 
 ## 使用约定
 
-- **操作语言**：遵循 `ACQUIRE/VERIFY/LINK/HEDGE/TRIM/COMMIT` 等指令前缀，后接事实或事实对。
-- **标签约束**：以 `CHxx` 标识章节索引，保证事实可追溯。
-- **事实规范**：精炼、可验证、能被 `CognitiveCapital` 累积。
+- **操作语言**：遵循 $\texttt{ACQUIRE/VERIFY/LINK/HEDGE/TRIM/COMMIT}$ 等指令前缀，后接事实或事实对。
+- **标签约束**：以 $\texttt{CHxx}$ 标识章节索引，保证事实可追溯。
+- **事实规范**：精炼、可验证、能被 $\texttt{CognitiveCapital}$ 累积。
 
 ## 示例迭代
 

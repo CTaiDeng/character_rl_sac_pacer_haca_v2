@@ -209,3 +209,6 @@ __marimo__/
 /out/
 /res/
 /.idea/
+
+# Temporary helper artifacts
+out_prev_readme.txt

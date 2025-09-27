@@ -12,20 +12,17 @@ https://mymetamathematics.blogspot.com/
 
 构造：在 $(\Sigma^*,\circ,\varepsilon)$ 上取由左/右乘子、投影/测试（幂等）、闭包（幂等）生成的端算子子幺半群 $\mathcal M\subset\mathrm{End}(\Sigma^*)$。则 $\mathcal M$ 携带 KAT 结构；当与 $*$-连续半环 $(S,\oplus,\otimes)$ 耦合时得带权 KAT，从而赋予概率/隶属度/IDF 等加权语义。存在表示同态 $\Phi:\mathrm U(\mathfrak g)\to\mathrm{End}(\Sigma^*)$ 使 $\mathcal M$ 为同态像。定义 MDQ 为 $\Delta_i=Q(\partial\mathcal J/\partial \alpha_i) - \lambda_{\mathrm{comm}}\sum_j\|[G_i,G_j]\|\pi_j$，则优化在 $\mathcal M$ 的非交换约束下可计算，并将字符级 RL 的奖励稀疏转化为在带权 KAT 上的可审计、可回放的代数优化流程。
 
-## 开发协议（Development Protocol）
+## 开发协议
 
-* 演示脚本将策略网络视为**微型 LLM 头部**，直接读取“上一轮摘要 + 当前章节全文”的拼接文本并生成新的摘要。
-* `data/sample_article.txt` 使用 `"[----------------------------------------------------->"` 作为段落分割符号，模拟教师模型输出来的分段提示。
-* 训练过程中对每个分割执行**迭代摘要**：第 1 个摘要默认为空字符串，将其与第 1 个分割（两个分隔符之间的内容）拼接后得到第 1 次输出；随后把该摘要与第 2 个分割组合生成第 2 次输出，如此迭代，模拟蒸馏时“上一次摘要 + 间隔内容 → 新摘要”的累积推理轨迹。环境不会裁剪策略给出的文本，奖励函数依据章节覆盖率、语义相似度与文本新颖度综合打分。
-* 开发前请先在当前环境中安装 `numpy` 与 `pytorch`（可直接运行 `scripts/install_pytorch.sh`，该脚本会顺带安装 `numpy`）。
+本项目的开发协议已统一至 AGENTS.md，请参见该文件的“演示与环境约定”“Markdown 规范”“文档摘要同步规范”等章节。
 
-## Examples
+## 示例
 
-The `data/` directory contains sample textual material that mimics the structure of articles used throughout the project. For instance, `data/sample_article.txt` 提供了一篇多段落的中文示例文章，围绕状态表示、策略参数化以及评估流程等 SAC 概念展开，并补充了离线数据融合、超参数搜索与未来展望等段落。这些文字被刻意写得较长，以便验证分片处理与批量载入逻辑。文件通过 `"[----------------------------------------------------->"` 分隔段落，从而便于下游工具将其视作教师模型输出的逐段提示。
+数据目录 $\texttt{data/}$ 包含用于本项目的示例文本素材，结构与实际文章相仿。例如，$\texttt{data/sample\_article.txt}$ 提供一篇多段落中文示例，围绕状态表示、策略参数化与评估流程（SAC 概念）展开，并补充离线数据融合、超参数搜索与展望等段落。文本较长，以便验证分片处理与批量载入逻辑。文件通过 $\texttt{"[----------------------------------------------------->"}$ 分隔段落，便于下游工具将其视作教师模型输出的逐段提示。
 
-### Loading the sample article
+### 加载示例文章
 
-You can load the example document using standard Python file operations. The snippet below demonstrates how to stream the file and split it into paragraphs for further preprocessing:
+可以使用标准的 Python 文件操作加载示例文档。下面的代码演示如何流式读取文件，并按分隔符切分为段落以便后续预处理：
 
 ```python
 from pathlib import Path
@@ -42,11 +39,11 @@ for idx, interval in enumerate(intervals, start=1):
     print(f"Interval {idx}: {interval[:60]}...")
 ```
 
-This workflow mirrors the intended usage within data ingestion pipelines, ensuring that each section of the article can be independently tokenized or transformed before feeding into SAC-related training tasks.
+该工作流反映了数据接入流水线中的预期用法，确保文章的每个片段在送入与 SAC 相关的训练任务前，都可以被独立分词或变换处理。
 
-### Inspecting chapter previews and quality metrics
+### 检查章节预览与质量指标
 
-The demo now works纯文本输入，可以利用 `src.character_sac_trainer.analyze_summary` 检查摘要与章节之间的长度比例、语义相似度以及新颖度。示例脚本如下：
+当前演示基于纯文本输入，可调用 $\texttt{src.character\_sac\_trainer.analyze\_summary}$ 在“上一轮摘要 + 当前章节”拼接后，对长度、相似度、覆盖率、新颖度以及词法合规等指标进行分析：
 
 ```python
 from pathlib import Path
@@ -90,13 +87,13 @@ for index, chapter in enumerate(chapters, start=1):
 
 这些信息与训练日志一致：每次 step 都会打印前后各 20 个字符的预览，并给出拼接后的“上一轮摘要 + 当前章节”字符数，以及针对该组合文本计算出的覆盖率、语义相似度、新颖度、乱码比例及词语合规缺失率等指标。摘要完全由策略网络生成，环境不会再按固定上限截断文本，而是直接依据上述质量指标、乱码惩罚与词合规惩罚给出奖励。
 
-## Demo training run
+## 演示训练运行
 
-The repository ships with a `character_sac_trainer.py` module under `src/` that wires together the replay buffer, agent, and trainer scaffolding using a toy environment constructed from the sample article statistics and iterative distillation summaries.
+仓库在 $\texttt{src/}$ 目录下提供 $\texttt{character\_sac\_trainer.py}$ 模块。该模块基于示例文章的统计信息与迭代蒸馏摘要构造了一个玩具环境，并将回放缓存、智能体与训练器脚手架串接起来。
 
-### Dependencies
+### 依赖
 
-The demo requires Python 3.10+ and the CPU build of [PyTorch](https://pytorch.org/). Optionally create and activate a virtual environment before installing the dependencies and running the script:
+演示需要 Python 3.10+ 与 [PyTorch](https://pytorch.org/) 的 CPU 版本。建议在安装依赖与运行脚本之前创建并激活虚拟环境：
 
 ```bash
 python -m venv .venv
@@ -104,11 +101,11 @@ source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
 scripts/install_pytorch.sh
 ```
 
-> 若不希望创建虚拟环境，也可以直接执行 `scripts/install_pytorch.sh`，脚本会升级 `pip` 并安装 CPU 版本的 PyTorch（使用官方 `https://download.pytorch.org/whl/cpu` 镜像）。
+> 若不希望创建虚拟环境，也可以直接执行 $\texttt{scripts/install\_pytorch.sh}$，脚本会升级 $\texttt{pip}$ 并安装 CPU 版本的 PyTorch（使用官方 $\texttt{https://download.pytorch.org/whl/cpu}$ 镜像）。
 
-### Running the demo
+### 运行演示
 
-Execute the module from the repository root. Ensure `src/` is available on `PYTHONPATH` (for example by activating the virtual environment above) and run it with `-m`:
+请在仓库根目录执行模块。确保 $\texttt{src/}$ 已包含在 $\texttt{PYTHONPATH}$ 中（例如激活上面的虚拟环境），并使用 $\texttt{-m}$ 方式运行：
 
 ```bash
 PYTHONPATH=src python -m train_demo --rounds 3
@@ -116,13 +113,13 @@ PYTHONPATH=src python -m train_demo --rounds 3
 python -m src.character_sac_trainer --rounds 3
 ```
 
-每轮训练固定遍历 `data/sample_article.txt` 的全部 76 个分割片段，因此每个迭代（iteration）恰好对应一次环境 step，`--rounds` 仅控制重复轮次（默认 1000 轮）。脚本会在完成 76 个交互后集中执行一批 SAC 更新，数量与步骤数一致，从而模拟“先收集一整轮经验，再统一回放训练”的节奏。需要缩减或扩充集中训练的强度时，可以通过 `--post-round-updates` 覆盖默认值；`--replay-capacity` 则依旧决定演示缓冲区能保留多少过往转换。针对快速冒烟测试，还可以附加 `--max-chapters 2`（或任意正整数）限制每轮使用的章节数量，从而在几次 step 内观察完整的日志与训练流程。
+每轮训练固定遍历 $\texttt{data/sample\_article.txt}$ 的全部 76 个分割片段，因此每个迭代（iteration）恰好对应一次环境 step，$\texttt{--rounds}$ 仅控制重复轮次（默认 1000 轮）。脚本会在完成 76 个交互后集中执行一批 SAC 更新，数量与步骤数一致，从而模拟“先收集一整轮经验，再统一回放训练”的节奏。需要缩减或扩充集中训练的强度时，可以通过 $\texttt{--post-round-updates}$ 覆盖默认值；$\texttt{--replay-capacity}$ 则依旧决定演示缓冲区能保留多少过往转换。针对快速冒烟测试，还可以附加 $\texttt{--max-chapters 2}$（或任意正整数）限制每轮使用的章节数量，从而在几次 step 内观察完整的日志与训练流程。
 
 环境奖励通过衡量语义相似度、覆盖率与新颖度的加权组合来评估摘要质量，并额外扣除与乱码比例、词语合规缺失率成正比的惩罚项；所有指标都会在日志中打印，便于观察策略如何平衡保真度、改写度、编码质量与词语流畅性。
 
-### Expected output
+### 预期输出
 
-The command prints a short training log summarizing the reward, replay buffer size, placeholder policy loss, and the quality diagnostics (length ratio, similarity, coverage, novelty) for each simulated step. Example output:
+该命令会打印精简的训练日志，汇总每个模拟 step 的奖励、回放缓冲区大小、占位的策略损失，以及质量诊断指标（长度比、相似度、覆盖率、新颖度）。示例输出：
 
 ```
 Loaded article debug info: chars=12345 preview="示例文本...结尾片段"
@@ -149,77 +146,77 @@ Configured schedule: steps_per_round=76 post_round_updates=76
     Post-round metric averages | policy_loss=-0.2345 q1_loss=0.4567 q2_loss=0.8910 average_reward=-0.3210
 ```
 
-Actual numbers vary because the demo samples synthetic actions stochastically, but the structure of the log should match the example. Each step reports both the character length and a head/tail preview of the current input segment, while the iterative summary preview直接展示策略的确定性输出且不会经过额外裁剪。After 76 steps finish, the trainer prints一个集中更新阶段的详情：逐次的策略/价值损失以及整轮的平均指标，帮助观察批量回放的收敛趋势。
+由于演示采用随机采样的方式生成动作，具体数值会有所波动，但日志结构应与示例一致。每一步都会同时报告字符长度与当前输入片段的首/尾预览；在迭代摘要预览中也会直观呈现关键指标。完成 76 步后，训练器会打印阶段性汇总，包括各损失项与奖励的均值等，便于观察收敛趋势。
 
-### Saved artifacts
+### 产物保存
 
-After the log finishes, the script 会首先清理旧的 CSV/HTML 产物，并将新的训练记录写入 `out/step_metrics.csv` 与 `out/round_metrics.csv`。随后，程序会基于 CSV 自动生成一份自包含的奖励仪表盘 `out/rewards.html`，无需额外服务器即可在浏览器中查看 Step 奖励走势与轮次汇总。
+日志结束后，脚本会生成 CSV/HTML 报表，将本次训练记录写入 $\texttt{out/step\_metrics.csv}$ 与 $\texttt{out/round\_metrics.csv}$；此外会基于这些 CSV 自动生成一份可视化结果页 $\texttt{out/rewards.html}$，便于直接查看 Step 与 Round 的指标走势和位置统计。
 
-训练过程中，每轮结束后都会即时导出一份模型快照到 `out/round_snapshots/demo_agent_snapshot_round_XXXX.json`（`XXXX` 为四位轮次编号）。这些文件包含该轮次完成时的奖励统计、经验回放大小等元信息，方便在长时间训练中追踪中间状态。最终在所有轮次结束后，脚本仍会把完整的代理状态保存到 `out/demo_agent_snapshot.json`，并生成一份精确 199 MB（209,460,851 字节）的模型占位文件 `out/demo_agent_model.bin`。所有产物自动落盘到 `out/` 目录，便于后续流程复用或进一步加工演示产出的检查点。
+训练过程中，每轮结束后都会即时导出一份模型快照到 $\texttt{out/round\_snapshots/demo\_agent\_snapshot\_round\_XXXX.json}$（$\texttt{XXXX}$ 为四位轮次编号）。这些文件包含该轮次完成时的奖励统计、经验回放大小等元信息，方便在长时间训练中追踪中间状态。最终在所有轮次结束后，脚本仍会把完整的代理状态保存到 $\texttt{out/demo\_agent\_snapshot.json}$，并生成一份精确 199 MB（209,460,851 字节）的模型占位文件 $\texttt{out/demo\_agent\_model.bin}$。所有产物自动落盘到 $\texttt{out/}$ 目录，便于后续流程复用或进一步加工演示产出的检查点。
 
 ### CSV 导出与可视化
 
 训练循环会在运行过程中实时写入两个 CSV 文件：
 
-* `out/step_metrics.csv`：逐 step 的奖励与质量指标。字段包含轮次 (`round`)、局部 step 序号 (`step`)、全局 step (`global_step`)、即时奖励 (`reward`)、上一轮摘要长度 (`previous_summary_length`)、当前章节长度 (`chapter_length`)、拼接源文本长度 (`source_length`)、摘要长度 (`summary_length`)，以及基于该拼接文本计算的语义相似度、覆盖率、新颖度、乱码惩罚、词语合规惩罚等诊断数据。
-* `out/round_metrics.csv`：每轮训练完成时的汇总分数，记录当轮 step 数 (`steps`)、总奖励 (`total_reward`) 与平均奖励 (`average_reward`)。
+* $\texttt{out/step\_metrics.csv}$：逐 step 的奖励与质量指标。字段包含轮次 ($\texttt{round}$)、局部 step 序号 ($\texttt{step}$)、全局 step ($\texttt{global\_step}$)、即时奖励 ($\texttt{reward}$)、上一轮摘要长度 ($\texttt{previous\_summary\_length}$)、当前章节长度 ($\texttt{chapter\_length}$)、拼接源文本长度 ($\texttt{source\_length}$)、摘要长度 ($\texttt{summary\_length}$)，以及基于该拼接文本计算的语义相似度、覆盖率、新颖度、乱码惩罚、词语合规惩罚等诊断数据。
+* $\texttt{out/round\_metrics.csv}$：每轮训练完成时的汇总分数，记录当轮 step 数 ($\texttt{steps}$)、总奖励 ($\texttt{total\_reward}$) 与平均奖励 ($\texttt{average\_reward}$)。
 
-仓库同时提供 `visualizations/training_metrics.html`，可通过浏览器读取上述 CSV 并基于 Chart.js 绘制折线/柱状图。推荐在仓库根目录执行 `python -m http.server` 后，访问 `http://localhost:8000/visualizations/training_metrics.html`，即可看到 Step 与 Round 奖励的走势；若 CSV 文件缺失或为空，页面会给出相应提示。若想脱离静态服务器快速查看结果，也可以直接打开自动生成的 `out/rewards.html`，该文件已经内嵌 Chart.js 并包含最新奖励摘要。
+仓库同时提供 $\texttt{visualizations/training\_metrics.html}$，可通过浏览器读取上述 CSV 并基于 Chart.js 绘制折线/柱状图。推荐在仓库根目录执行 $\texttt{python -m http.server}$ 后，访问 $\texttt{http://localhost:8000/visualizations/training\_metrics.html}$，即可看到 Step 与 Round 奖励的走势；若 CSV 文件缺失或为空，页面会给出相应提示。若想脱离静态服务器快速查看结果，也可以直接打开自动生成的 $\texttt{out/rewards.html}$，该文件已经内嵌 Chart.js 并包含最新奖励摘要。
 
 ## 数据工具（Data utilities）
 
 - 输入-输出-打分映射（JSON 模式）
-  - 文件：`data/io_score_mapping.json`
+  - 文件：$\texttt{data/io\_score\_mapping.json}$
   - 含义：定义最小映射 schema（input/output/score）与示例，可供脚本/服务按统一 schema 记录或消费。
 
 - 生成词长集合（用于可变长度后缀命中）
-  - 脚本：`python -m data.gen_word_length_sets`
-  - 输出：`data/word_length_sets.json`，包含 names/freq/union 三块长度集合与去重计数。
+  - 脚本：$\texttt{python -m data.gen\_word\_length\_sets}$
+  - 输出：$\texttt{data/word\_length\_sets.json}$，包含 names/freq/union 三块长度集合与去重计数。
 
 - 词表命中查询（供代码与 CLI 使用）
-  - 模块：`data/catalog_lookup.py`（可 `from data import catalog_lookup`）
-  - 接口：`load_catalog()`、`annotate(term)`、`longest_prefix_hit(text,lengths)`、`suffix_hit(text,lengths)`
+  - 模块：$\texttt{data/catalog\_lookup.py}$（可 $\texttt{from data import catalog\_lookup}$）
+  - 接口：$\texttt{load\_catalog()}$、$\texttt{annotate(term)}$、$\texttt{longest\_prefix\_hit(text,lengths)}$、$\texttt{suffix\_hit(text,lengths)}$
   - CLI 示例：
-    - 标注：`python -m data.catalog_lookup --query "精妙"`
-    - 前缀：`python -m data.catalog_lookup --prefix "精妙。如" --lengths 2,3,4`
-    - 后缀：`python -m data.catalog_lookup --suffix "”他喃喃" --lengths 2,3,4`
+    - 标注：$\texttt{python -m data.catalog\_lookup --query "精妙"}$
+    - 前缀：$\texttt{python -m data.catalog\_lookup --prefix "精妙。如" --lengths 2,3,4}$
+    - 后缀：$\texttt{python -m data.catalog\_lookup --suffix "”他喃喃" --lengths 2,3,4}$
 
-## 文档摘要（docs）
-
-- `docs/1755455209_将阅读理解形式化为“认知资本”的交易与增值过程：基于传统数学的严格论证.md`
+## 文档摘要索引
+<!-- DOCS-SUMMARY-INDEX:START -->
+- $\texttt{docs/1755455209\_将阅读理解形式化为“认知资本”的交易与增值过程：基于传统数学的严格论证.md}$
   - 摘要：本文围绕：首先明确问题背景与约束，给出可验证的形式化定义与工程接口；随后分解系统/模型/数据/指标的关键设计，并给出可复现的实现与对齐路径；最后总结风险与边界条件，给出落地建议与扩展路线。
-- `docs/1758491618_字符粒度策略环境 V2：无泄漏 POMDP + 离散最大熵 SAC（期望备份·Top‑p）.md`
+- $\texttt{docs/1758491618\_字符粒度策略环境 V2：无泄漏 POMDP + 离散最大熵 SAC（期望备份Top-p）.md}$
   - 摘要：本文面向字符级 POMDP 场景，系统化整理离散动作 SAC 的实现细节：策略/价值网络结构、温度/熵目标的自适应、Top-p 采样与合规 Mask 的协同，以及 CQL/BC/DAgger/EMA 等稳定训练技巧。结合生产日志与指标，给出从冷启动到稳态的调参与收敛路径，并讨论长序列与约束采样下的可观测性折中。
-- `docs/1758817301_字符模式 SAC 的工程实现与数学化描述v1.0.0.md`
+- $\texttt{docs/1758817301\_字符模式 SAC 的工程实现与数学化描述v1.0.0.md}$
   - 摘要：版本 v1.0.0 聚焦最小可用字符级 SAC：定义观测/动作/奖励与回放结构，给出策略与双 Q 网络的参数化与损失，提供训练循环与指标记录的标准模板。强调能跑通、易复现与可度量，为后续版本的稳态与性能优化打下基线。
-- `docs/1758817301_字符模式 SAC 的工程实现与数学化描述v2.0.0.md`
+- $\texttt{docs/1758817301\_字符模式 SAC 的工程实现与数学化描述v2.0.0.md}$
   - 摘要：版本 v2.0.0 在 v1 基线之上引入候选采样改进、奖励拆分与度量细化、目标网络与软更新策略，并完善日志与可视化管线。通过更稳定的超参与数据流，显著提升训练收敛性与可观测性，适配更长上下文与更严格的合规约束。
-- `docs/1758835124_《字符模式 SAC 的工程实现与数学化描述》对中文知识蒸馏的意义.md`
+- $\texttt{docs/1758835124\_《字符模式 SAC 的工程实现与数学化描述》对中文知识蒸馏的意义.md}$
   - 摘要：本文围绕：首先明确问题背景与约束，给出可验证的形式化定义与工程接口；随后分解系统/模型/数据/指标的关键设计，并给出可复现的实现与对齐路径；最后总结风险与边界条件，给出落地建议与扩展路线。
-- `docs/1758835125_可变词数×注意力长度（Flex-Attn）方案：架构说明与落地路线图.md`
+- $\texttt{docs/1758835125\_可变词数×注意力长度（Flex-Attn）方案：架构说明与落地路线图.md}$
   - 摘要：阐述可变成本注意力（Flex-Attn）的动机、设计与实现：在合规约束与预算限制下，按需分配注意力计算资源。文中拆解组件与调用关系、关键超参与时间/显存开销，并给出与历史/状态缓存结合的工程实践与调优建议。
-- `docs/1758835126_零训练表驱动 Flex-Attn：可计算词法 + 有限状态索引的快速落地.md`
+- $\texttt{docs/1758835126\_零训练表驱动 Flex-Attn：可计算词法 + 有限状态索引的快速落地.md}$
   - 摘要：阐述可变成本注意力（Flex-Attn）的动机、设计与实现：在合规约束与预算限制下，按需分配注意力计算资源。文中拆解组件与调用关系、关键超参与时间/显存开销，并给出与历史/状态缓存结合的工程实践与调优建议。
-- `docs/1758835127_医疗问答端到端示例：Flex-Attn 生成“奥司他韦”专业定义.md`
+- $\texttt{docs/1758835127\_医疗问答端到端示例：Flex-Attn 生成“奥司他韦”专业定义.md}$
   - 摘要：阐述可变成本注意力（Flex-Attn）的动机、设计与实现：在合规约束与预算限制下，按需分配注意力计算资源。文中拆解组件与调用关系、关键超参与时间/显存开销，并给出与历史/状态缓存结合的工程实践与调优建议。
-- `docs/1758835128_中文知识蒸馏基座的企业级价值评估：质量×成本×治理×扩展性.md`
+- $\texttt{docs/1758835128\_中文知识蒸馏基座的企业级价值评估：质量×成本×治理×扩展性.md}$
   - 摘要：从价值偏置与微分耦合出发，连接 PFB-GNLA/KAT/GRL 的理论与工程：刻画可解释的约束梯度与通信惩罚，分析对收敛路径与泛化边界的影响。结合可复现实验，给出可检验的结论与实用建议。
-- `docs/1758835129_词法KAT作用幺半群.md`
+- $\texttt{docs/1758835129\_词法KAT作用幺半群.md}$
   - 摘要：介绍 Kleene Algebra with Tests（KAT）与相关闭包/半环结构在本项目中的角色：用以建模可验证控制流、停机点与合规模式。提供从数学结构到工程接口的映射规范，支撑规则检查、代价累积与策略约束的统一表达。
-- `docs/1758835130_词法KAT作用幺半群的幂子幺半群谱系（规范与工程用法）.md`
+- $\texttt{docs/1758835130\_词法KAT作用幺半群的幂子幺半群谱系（规范与工程用法）.md}$
   - 摘要：介绍 Kleene Algebra with Tests（KAT）与相关闭包/半环结构在本项目中的角色：用以建模可验证控制流、停机点与合规模式。提供从数学结构到工程接口的映射规范，支撑规则检查、代价累积与策略约束的统一表达。
-- `docs/1758835131_价值偏好向量（微分动力量子）的构造：PFB-GNLA 退化下的词法KAT作用幺半群 × GRL路径积分.md`
+- $\texttt{docs/1758835131\_价值偏好向量（微分动力量子）的构造：PFB-GNLA 退化下的词法KAT作用幺半群 × GRL路径积分.md}$
   - 摘要：介绍 Kleene Algebra with Tests（KAT）与相关闭包/半环结构在本项目中的角色：用以建模可验证控制流、停机点与合规模式。提供从数学结构到工程接口的映射规范，支撑规则检查、代价累积与策略约束的统一表达。
-- `docs/1758835132_基于传统数学语言的形式化：PFB-GNLA 退化 × 词法KAT作用幺半群 × GRL路径积分中的“价值偏好向量与微分动力量子”.md`
+- $\texttt{docs/1758835132\_基于传统数学语言的形式化：PFB-GNLA 退化 × 词法KAT作用幺半群 × GRL路径积分中的“价值偏好向量与微分动力量子”.md}$
   - 摘要：介绍 Kleene Algebra with Tests（KAT）与相关闭包/半环结构在本项目中的角色：用以建模可验证控制流、停机点与合规模式。提供从数学结构到工程接口的映射规范，支撑规则检查、代价累积与策略约束的统一表达。
-- `docs/1758835133_“微分动力量子（MDQ）”在离散化LLM的工程化落地：最小单元、线性积累、热插拔与统一版本治理.md`
+- $\texttt{docs/1758835133\_“微分动力量子（MDQ）”在离散化LLM的工程化落地：最小单元、线性积累、热插拔与统一版本治理.md}$
   - 摘要：提出 MDQ 机制稳定离散 LLM/策略管道：支持小单元交互与统一版本控制，缓解长序列采样的非平稳与暴露偏差。结合指令设计与记忆扩展策略，给出训练/推理一体化的实现路线与评估指标。
-- `docs/1758835134_这套理论是否“巧妙”：结论与十条硬核巧思.md`
+- $\texttt{docs/1758835134\_这套理论是否“巧妙”：结论与十条硬核巧思.md}$
   - 摘要：本文围绕：首先明确问题背景与约束，给出可验证的形式化定义与工程接口；随后分解系统/模型/数据/指标的关键设计，并给出可复现的实现与对齐路径；最后总结风险与边界条件，给出落地建议与扩展路线。
-- `docs/1758835135_神经网络等价解耦与“三层分治”（MDQ 网络 × 索引泛函 × OOV 内存库）落地方案.md`
+- $\texttt{docs/1758835135\_神经网络等价解耦与“三层分治”（MDQ 网络 × 索引泛函 × OOV 内存库）落地方案.md}$
   - 摘要：提出 MDQ 机制稳定离散 LLM/策略管道：支持小单元交互与统一版本控制，缓解长序列采样的非平稳与暴露偏差。结合指令设计与记忆扩展策略，给出训练/推理一体化的实现路线与评估指标。
-- `docs/1758835136_这套理论对“字符级RL奖励稀疏”世界级难题的实质性贡献（企业口径，长文版）.md`
+- $\texttt{docs/1758835136\_这套理论对“字符级RL奖励稀疏”世界级难题的实质性贡献（企业口径，长文版）.md}$
   - 摘要：本文围绕：首先明确问题背景与约束，给出可验证的形式化定义与工程接口；随后分解系统/模型/数据/指标的关键设计，并给出可复现的实现与对齐路径；最后总结风险与边界条件，给出落地建议与扩展路线。
-- `docs/1758835137_这套理论对“字符级RL奖励稀疏”世界级难题的实质性贡献.md`
+- $\texttt{docs/1758835137\_这套理论对“字符级RL奖励稀疏”世界级难题的实质性贡献.md}$
   - 摘要：本文围绕：首先明确问题背景与约束，给出可验证的形式化定义与工程接口；随后分解系统/模型/数据/指标的关键设计，并给出可复现的实现与对齐路径；最后总结风险与边界条件，给出落地建议与扩展路线。
-
+<!-- DOCS-SUMMARY-INDEX:END -->
