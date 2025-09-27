@@ -37,6 +37,10 @@ def main() -> int:
     rc |= run([sys.executable, str(ROOT / 'scripts' / 'rename_docs_to_git_ts.py')])
     rc |= run([sys.executable, str(ROOT / 'scripts' / 'insert_doc_date_from_prefix.py')])
     rc |= run([sys.executable, str(ROOT / 'scripts' / 'update_readme_index.py')])
+    # 清理索引中可能遗留的 $\texttt{...}$ 样式，统一为反引号
+    rc |= run([sys.executable, str(ROOT / 'scripts' / 'fix_readme_index_style.py')])
+    # 全仓清理 $\texttt{...}$ → `...`
+    rc |= run([sys.executable, str(ROOT / 'scripts' / 'convert_texttt_to_backticks.py')])
     # 规范化 README 与 docs
     rc |= run([sys.executable, str(ROOT / 'scripts' / 'md_normalize.py'), 'README.md'])
     rc |= run([sys.executable, str(ROOT / 'scripts' / 'md_normalize.py'), 'docs'])
@@ -49,4 +53,3 @@ def main() -> int:
 
 if __name__ == '__main__':
     sys.exit(main())
-
