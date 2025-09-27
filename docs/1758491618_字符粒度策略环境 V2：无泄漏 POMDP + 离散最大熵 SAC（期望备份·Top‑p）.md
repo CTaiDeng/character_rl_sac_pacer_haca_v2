@@ -16,10 +16,10 @@
 
 * **温度自适应修正**：采用 $\log\alpha \leftarrow \log\alpha + \eta_\alpha\,(H_{\text{tgt}}-H(\pi))$；当熵不足时提升 $\alpha$。
 * **终止截断**：目标值加入 $(1-\text{done})$；终止步不 bootstrap。
-* **Top‑K → Top‑p**：按覆盖率 $p$ 近似期望（默认 $p=0.98$）；选集 $\texttt{detach()}$，仅用于值目标，策略项可选全量或同一 Top‑p。
+* **Top‑K → Top‑p**：按覆盖率 $p$ 近似期望（默认 $p=0.98$）；选集 `detach()`，仅用于值目标，策略项可选全量或同一 Top‑p。
 * **奖励尺度化**：对覆盖与 NCE 奖励启用 **PopArt/EMA 标准化**，抑制尺度漂移。
 * **InfoNCE 防漂移**：使用 **EMA 目标编码器** $\bar f$ 与负样本队列。
-* **数值稳定**：稳定化 softmax、$\epsilon$-clip、掩码 $\texttt{-1e9}$、logits 平移。
+* **数值稳定**：稳定化 softmax、$\epsilon$-clip、掩码 `-1e9`、logits 平移。
 * **CQL 正则（可拨码）**：缓解 demo/agent 混分布下的 OOD‑Q 过估。
 * **教师并轨治理**：教师动作与掩码冲突**直接拒收或重标**，DAgger 指标纳管。
 
@@ -106,13 +106,13 @@ $$
 
 **(3) 字符二元奖励（拓扑记忆）**
 
-对字符模式，构造上一字符与目标字符形成的二元组 $b_t = s_{t-1}^{(1)} c_t$。若 $b_t$ 命中 $\texttt{data/chinese\_frequency\_word.json}$ 或 $\texttt{data/chinese\_name\_frequency\_word.json}$ 提取的二字词集合 $\mathcal{L}$，则给予额外奖励
+对字符模式，构造上一字符与目标字符形成的二元组 $b_t = s_{t-1}^{(1)} c_t$。若 $b_t$ 命中 `data/chinese_frequency_word.json` 或 `data/chinese_name_frequency_word.json` 提取的二字词集合 $\mathcal{L}$，则给予额外奖励
 
 $$
 \mathrm{bonus}_t = \lambda_{\text{bigram}} \cdot \mathbf{1}[b_t \in \mathcal{L}], \qquad \lambda_{\text{bigram}} = 1.0,
 $$
 
-其中 $\mathcal{L}$ 为上述两个词表的并集（过滤为二字词），必要时可合并原文滑窗补充样本。二元组 $b_t$ 由上一目标字符与当前动作字符拼接而成，该奖励直接累加到字符模式的 $\texttt{soft}$ 组件，促使策略优先记忆原文的非交换邻接字符组合。同时，将质量信号按照 $0.5/0.25$ 的权重注入基础与潜在分数，使高质量字符动作在硬指标上得到体现。
+其中 $\mathcal{L}$ 为上述两个词表的并集（过滤为二字词），必要时可合并原文滑窗补充样本。二元组 $b_t$ 由上一目标字符与当前动作字符拼接而成，该奖励直接累加到字符模式的 `soft` 组件，促使策略优先记忆原文的非交换邻接字符组合。同时，将质量信号按照 $0.5/0.25$ 的权重注入基础与潜在分数，使高质量字符动作在硬指标上得到体现。
 
 **(4) 洁净/非法罚**
 
@@ -140,7 +140,7 @@ r_t=\lambda_{\mathrm{cov}}\cdot \mathcal{N}(\mathrm{cov}_t)+
 \lambda_{\mathrm{ill}}\cdot \mathrm{ill}_t
 $$
 
-非法动作可选 $\texttt{done=True}$（硬边界），$r_t=-\lambda_{\mathrm{ill}}$。
+非法动作可选 `done=True`（硬边界），$r_t=-\lambda_{\mathrm{ill}}$。
 
 > 建议：$n\in\{3,4\}$，$W=64$，$\tau=0.07$。
 
@@ -155,7 +155,7 @@ V_{\text{soft}}(s')=\sum_{a'\in\mathcal{A}(s')}\pi_\theta(a'|o')\Big[\min_i Q'_{
 $$
 
 **Top‑p 近似（降耗·覆盖率驱动）**
-取最小集合 $\mathcal{P}(s')\subseteq\mathcal{A}(s')$ 使 $\sum_{a'\in\mathcal{P}}\pi(a'|o')\ge p$；定义 $\pi_p\propto \pi\cdot \mathbf{1}[a\in\mathcal{P}]$（**重归一化**）。选集 **$\texttt{detach()}$**。
+取最小集合 $\mathcal{P}(s')\subseteq\mathcal{A}(s')$ 使 $\sum_{a'\in\mathcal{P}}\pi(a'|o')\ge p$；定义 $\pi_p\propto \pi\cdot \mathbf{1}[a\in\mathcal{P}]$（**重归一化**）。选集 **`detach()`**。
 
 $$
 \hat V_{\text{soft}}(s')=\sum_{a'\in\mathcal{P}(s')}\pi_p(a'|o')\Big[\min_iQ'_{\bar\phi_i}(o',a')-\alpha\log\pi_p(a'|o')\Big]
@@ -205,7 +205,7 @@ $$
 
 ### 7. 教师并轨（双缓冲 + BC + DAgger）
 
-* **双缓冲**：教师样本入 $\mathcal{D}_{demo}$（$\texttt{is\_demo=1}$），代理样本入 $\mathcal{D}_{agent}$。
+* **双缓冲**：教师样本入 $\mathcal{D}_{demo}$（`is_demo=1`），代理样本入 $\mathcal{D}_{agent}$。
 * **混采**：分层/配额采样，实际批 $\mathcal{B}=\mathcal{B}_{agent}\cup\mathcal{B}_{demo}$，比例 $\rho:(1-\rho)$。
 * **BC 辅助**（仅 demo）：
 
@@ -213,8 +213,8 @@ $$
   \mathcal{L}_{BC}=\lambda_{BC}\cdot \mathbb{E}_{(o,a^*)\in\mathcal{B}_{demo}}[-\log \pi_\theta(a^*|o)]
   $$
 * **策略总损失**：$\mathcal{L}_\pi^{tot}=\mathcal{L}_\pi+\mathcal{L}_{BC}$。
-* **DAgger 调度**：$\texttt{teacher\_ratio}$ 线性退火（1.0→0.1）。
-* **冲突治理**：若教师动作与掩码冲突，样本**拒收**或**映射到最近合法替代**并标注 $\texttt{is\_relabeled=1}$（分桶监控）。
+* **DAgger 调度**：`teacher_ratio` 线性退火（1.0→0.1）。
+* **冲突治理**：若教师动作与掩码冲突，样本**拒收**或**映射到最近合法替代**并标注 `is_relabeled=1`（分桶监控）。
 
 > 可选替代：IQL/AWAC 优势加权减少显式 BC 扭曲（拨码试验，不纳入最小必需集）。
 
@@ -338,7 +338,7 @@ for episode in range(E):
 * **熵**：$\kappa=0.9$；$\alpha\in[10^{-4}, 2]$ 动态。
 * **奖励**：$\lambda_{\mathrm{cov}}=1.0$，$\lambda_{\mathrm{nce}}=0.5$，$\lambda_{\mathrm{gar}}=0.1$，$\lambda_{\mathrm{ill}}=2.0$；PopArt $\beta=1\mathrm{e}{-3}$。
 * **数据**：$\rho=0.75$，$\lambda_{BC}=0.1$，DAgger 线性退火 200k→20k 步。
-* **稳定**：梯度裁剪 0.5；掩码在 logit 层；$\texttt{nan/inf}$ 钩子开启。
+* **稳定**：梯度裁剪 0.5；掩码在 logit 层；`nan/inf` 钩子开启。
 * **CQL**：$\lambda_{\text{CQL}}=0.5$（可拨码 0\~1）。
 
 ---
@@ -382,7 +382,7 @@ for episode in range(E):
 | 熵不足时 α 方向错误      |  高 |  低 | 已修正更新式 + α 区间监控                 |
 | 终止步 bootstrap 污染 |  高 |  低 | $(1-\text{done})$ 截断 + 单测       |
 | InfoNCE 漂移       |  高 |  中 | EMA 目标编码器 + 队列负样 + 温标固定         |
-| Top‑p 覆盖不足偏差     |  中 |  中 | 覆盖率 KPI 触发升 $p$/K；选集 $\texttt{detach()}$ |
+| Top‑p 覆盖不足偏差     |  中 |  中 | 覆盖率 KPI 触发升 $p$/K；选集 `detach()` |
 | Demo 价值污染        |  中 |  中 | 掩码冲突拒收/重标 + CQL 正则              |
 | 数值不稳（nan/inf）    |  中 |  中 | logits 平移、$\epsilon$-clip、监控钩子  |
 
@@ -402,7 +402,7 @@ $\arg\max_\pi \mathbb{E}\sum_t \gamma^t r'_t=\arg\max_\pi \mathbb{E}\sum_t \gamm
 
 * 单测：温度更新方向、(1‑done) 截断、Top‑p 覆盖率、掩码冲突处理、PopArt 数学一致性。
 * A/B：$\gamma\in\{0.99,0.995,0.997\}$ × $p\in\{0.97,0.98,0.99\}$。
-* 拨码：$\texttt{use\_cql}$、$\texttt{policy\_use\_topp}$、$\texttt{ema\_target\_on}$、$\texttt{illegal\_done\_on}$。
+* 拨码：`use_cql`、`policy_use_topp`、`ema_target_on`、`illegal_done_on`。
 
 > **执行口径**：先合并本 V2 规范的**必改项**（温度/终止/数稳/奖励尺度/EMA‑NCE/Top‑p），再做小流量灰度；Gate 不过，自动回滚与快照对比复盘。
 
@@ -410,17 +410,17 @@ $\arg\max_\pi \mathbb{E}\sum_t \gamma^t r'_t=\arg\max_\pi \mathbb{E}\sum_t \gamm
 
 ### 15. 实现映射（仓库现状概览）
 
-* **无泄漏观测**：$\texttt{ArticleEnvironment.reset/step}$ 在字符模式下返回 $\texttt{TextObservation(pair[0], "")}$，仅暴露上一字符；二元组 $\texttt{pair=(c\_{t-1}, c\_t)}$ 与目标字符 $\texttt{c\_t}$ 仅在奖励与日志阶段使用。
-* **原地迭代**：日志中的 $\texttt{prev\_summary=c\_{t-1}}$、$\texttt{chapter=c\_t}$，$\texttt{raw\_action=c\_{t+1}}$（若存在）；$\texttt{source=c\_{t-1}c\_t}$，符合“非交换临近字符”拓扑。
-* **硬掩码数稳**：$\texttt{TextPolicyNetwork.\_mask\_logits}$ 将非法 logits 置为 $\texttt{-1e9}$，$\texttt{first\_step\_distribution}$ 提供合法掩码、概率与对数概率输出，直接支撑 Top‑p 期望与熵估计。
-* **Top‑p 期望**：$\texttt{DemoSACAgent.update}$ 的 $\texttt{\_select\_top\_p}$/$\texttt{\_evaluate\_q\_candidates}$ 组合在目标和策略两侧均采用截断重归一的概率，保持 $(1-done)$ 截断和 Twin-Q 最小化。
-* **温度自适应**：维护 $\texttt{log\_alpha}$（Adam 优化，学习率可配置），执行 $\log\alpha \leftarrow \log\alpha + \eta(H_{\text{tgt}}-H)$ 并限制 $\alpha\in[10^{-4},2]$；更新返回实时 $\texttt{alpha}$ 供监控。
-* **奖励拆分展示**：日志中 $\texttt{base/potential/soft}$ 通过 $\texttt{\_format\_reward\_component}$ 自动映射为“满分/负满分/数值”；在字符模式且代理输出与目标对齐时，三项同时显示“满分”。
-* **字符二元奖励**：$\texttt{ArticleEnvironment.step}$ 将目标字符与当前预测字符拼接成二元组，在字符模式检测其是否存在于 $\texttt{data/chinese\_frequency\_word.json}$ 或 $\texttt{data/chinese\_name\_frequency\_word.json}$，命中时追加 $\texttt{CHARACTER\_LEXICAL\_BIGRAM\_BONUS=1.0}$；若未命中但与教师目标一致，则给予 $\texttt{0.5}$ 的回退奖励，并在日志中记录 $\texttt{lexical\_bigram\_bonus}$。
-* **词频补全**：启动时调用  $\texttt{\_augment\_lexical\_statistics\_with\_bigrams}$ 对词频缓存进行补全，确保原文中出现的二字词至少以频次 1 写回。 
-* **日志宽度参数**： $\texttt{character\_length\_field\_width}$ 控制字符模式日志长度字段，默认 1，可在配置中调节。 
-* **日志宽度参数**：$\texttt{character\_length\_field\_width}$ 控制字符模式日志的长度字段，默认 1，可通过配置调整补零宽度。
-* **Trainer 日志同步**：字符模式下 $\texttt{DemoTrainer.run}$ 使用轮次教师对进行日志与教师干预，保证代理观测与回放的一致性。
+* **无泄漏观测**：`ArticleEnvironment.reset/step` 在字符模式下返回 `TextObservation(pair[0], "")`，仅暴露上一字符；二元组 $\texttt{pair=(c\_{t-1}, c\_t)}$ 与目标字符 `c_t` 仅在奖励与日志阶段使用。
+* **原地迭代**：日志中的 $\texttt{prev\_summary=c\_{t-1}}$、`chapter=c_t`，$\texttt{raw\_action=c\_{t+1}}$（若存在）；$\texttt{source=c\_{t-1}c\_t}$，符合“非交换临近字符”拓扑。
+* **硬掩码数稳**：`TextPolicyNetwork._mask_logits` 将非法 logits 置为 `-1e9`，`first_step_distribution` 提供合法掩码、概率与对数概率输出，直接支撑 Top‑p 期望与熵估计。
+* **Top‑p 期望**：`DemoSACAgent.update` 的 `_select_top_p`/`_evaluate_q_candidates` 组合在目标和策略两侧均采用截断重归一的概率，保持 $(1-done)$ 截断和 Twin-Q 最小化。
+* **温度自适应**：维护 `log_alpha`（Adam 优化，学习率可配置），执行 $\log\alpha \leftarrow \log\alpha + \eta(H_{\text{tgt}}-H)$ 并限制 $\alpha\in[10^{-4},2]$；更新返回实时 `alpha` 供监控。
+* **奖励拆分展示**：日志中 `base/potential/soft` 通过 `_format_reward_component` 自动映射为“满分/负满分/数值”；在字符模式且代理输出与目标对齐时，三项同时显示“满分”。
+* **字符二元奖励**：`ArticleEnvironment.step` 将目标字符与当前预测字符拼接成二元组，在字符模式检测其是否存在于 `data/chinese_frequency_word.json` 或 `data/chinese_name_frequency_word.json`，命中时追加 `CHARACTER_LEXICAL_BIGRAM_BONUS=1.0`；若未命中但与教师目标一致，则给予 `0.5` 的回退奖励，并在日志中记录 `lexical_bigram_bonus`。
+* **词频补全**：启动时调用  `_augment_lexical_statistics_with_bigrams` 对词频缓存进行补全，确保原文中出现的二字词至少以频次 1 写回。 
+* **日志宽度参数**： `character_length_field_width` 控制字符模式日志长度字段，默认 1，可在配置中调节。 
+* **日志宽度参数**：`character_length_field_width` 控制字符模式日志的长度字段，默认 1，可通过配置调整补零宽度。
+* **Trainer 日志同步**：字符模式下 `DemoTrainer.run` 使用轮次教师对进行日志与教师干预，保证代理观测与回放的一致性。
 
 > **示例**（原文片段 “这五个字像一道闪电…” 中“意味着什么” 的字符展开）：
 
@@ -466,5 +466,5 @@ Step 05 | prev_summary=0001 chars "什"
        reward=0.803241 (base=+0.000000, potential=+0.000000, soft=+0.803241; 本次获得最高奖励)
 ```
 
-该日志由 $\texttt{DemoTrainer}$ 自动生成，前两行展示观测窗口（历史/目标字符），$\texttt{raw\_action}$ 为策略输出字符，$\texttt{summary}$ 为环境记账后的最新历史，结尾列出奖励拆分，便于人工复核。
+该日志由 `DemoTrainer` 自动生成，前两行展示观测窗口（历史/目标字符），`raw_action` 为策略输出字符，`summary` 为环境记账后的最新历史，结尾列出奖励拆分，便于人工复核。
 

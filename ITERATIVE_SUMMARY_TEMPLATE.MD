@@ -4,9 +4,9 @@
 
 ## 使用约定
 
-- **操作语言**：遵循 $\texttt{ACQUIRE/VERIFY/LINK/HEDGE/TRIM/COMMIT}$ 等指令前缀，后接事实或事实对。
-- **标签约束**：以 $\texttt{CHxx}$ 标识章节索引，保证事实可追溯。
-- **事实规范**：精炼、可验证、能被 $\texttt{CognitiveCapital}$ 累积。
+- **操作语言**：遵循 `ACQUIRE/VERIFY/LINK/HEDGE/TRIM/COMMIT` 等指令前缀，后接事实或事实对。
+- **标签约束**：以 `CHxx` 标识章节索引，保证事实可追溯。
+- **事实规范**：精炼、可验证、能被 `CognitiveCapital` 累积。
 
 ## 示例迭代
 

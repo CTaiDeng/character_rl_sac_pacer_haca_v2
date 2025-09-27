@@ -182,7 +182,7 @@
 2. 量化：$\Delta_i=Q(v_i)-p_i$；对 $L_h,L_p$ 同理。
 3. 投影与热更：$\alpha_i\leftarrow\Pi_{\mathrm{adm}}(\alpha_i+\Delta_i)$，更新窗口/上限。
 4. 合规闸：tests 不通过即拒绝更新。
-5. 监控：$\mathcal J$ 提升、$\texttt{word\_noncompliance}$ 下降、吞吐/显存稳定、日志回放 100%。
+5. 监控：$\mathcal J$ 提升、`word_noncompliance` 下降、吞吐/显存稳定、日志回放 100%。
 
 ---
 

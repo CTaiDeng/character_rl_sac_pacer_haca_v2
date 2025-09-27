@@ -65,12 +65,8 @@ INLINE_CODE_RE = re.compile(r"`([^`\n]+?)`")
 
 
 def convert_inline_code(s: str) -> str:
-    def _repl(m: re.Match) -> str:
-        inner = m.group(1)
-        safe = escape_for_texttt(inner)
-        return f"$\\texttt{{{safe}}}$"
-
-    return INLINE_CODE_RE.sub(_repl, s)
+    # 按最新规范：行内代码保持反引号，不做数学打字体转换
+    return s
 
 
 def normalize_markdown(text: str) -> str:

@@ -44,20 +44,21 @@ def main():
 
     for i, ln in enumerate(lines):
         t = ln.lstrip()
-        if t.startswith('- `docs/') and t.endswith('`'):
-            # 提取反引号内容
-            inner = t[len('- `'):-1]
-            new_ln = ln[: len(ln) - len(t)] + f"- $\\texttt{{{_escape_texttt(inner)}}}$"
+        if t.startswith('- $\\texttt{') and t.endswith('}$'):
+            # 将 $\texttt{...}$ 还原为反引号，并恢复下划线
+            inner = t[len('- $\\texttt{'):-2]
+            inner_unescaped = inner.replace('\\_', '_')
+            new_ln = ln[: len(ln) - len(t)] + f"- `{inner_unescaped}`"
             if new_ln != ln:
                 lines[i] = new_ln
                 changed = True
     if not changed:
-        print('[fix_readme_index_style] 索引块内无反引号条目，无需更改')
+        print('[fix_readme_index_style] 索引块内无需更改')
         return
     new_block = '\n'.join(lines)
     new_text = head + new_block + tail
     write_text(readme, new_text, nl)
-    print('[fix_readme_index_style] 已将索引条目改为 $\\texttt{...}$ 形式')
+    print('[fix_readme_index_style] 已将索引条目改为反引号行内代码形式')
 
 
 if __name__ == '__main__':
