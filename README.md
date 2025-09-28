@@ -4,6 +4,8 @@
 
 数学理论来源：
 
+https://drive.google.com/drive/folders/1lrgVtvhEq8cNal0Aa0AjeCNQaRA8WERu?usp=sharing
+
 https://mymetamathematics.blogspot.com/
 
 作者（GaoZheng）主页，欢迎访问
