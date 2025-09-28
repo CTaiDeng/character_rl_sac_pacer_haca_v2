@@ -49,6 +49,28 @@ PROMPT_TMPL = (
 )
 
 
+def build_prompt(stat: str, patch: str, lang: str) -> str:
+    lang = (lang or "zh").lower()
+    if lang == "en":
+        return (
+            "Please read the staged Git changes and produce a concise commit message.\n"
+            "- First line <= 60 chars in `type: subject`, type ∈ {feat, fix, docs, chore, refactor, test, perf, build, ci}.\n"
+            "- Then list 1–3 bullet points, each one line starting with `- `.\n"
+            "- Output in English only.\n\n"
+            "Name-status list:\n{stat}\n\n"
+            "Diff patch (may be truncated):\n{patch}\n"
+        ).format(stat=stat, patch=patch)
+    # default zh
+    return (
+        "请根据以下 Git 已暂存改动，生成简洁的提交信息。\n"
+        "- 第一行不超过 60 字，形如 `type: subject`，type ∈ {feat, fix, docs, chore, refactor, test, perf, build, ci}。\n"
+        "- 其后最多列出 1–3 条要点，每条一行，以 `- ` 开头。\n"
+        "- 必须仅用简体中文输出，不要夹杂英文。\n\n"
+        "变更列表（name-status）：\n{stat}\n\n"
+        "差异补丁（可能已截断）：\n{patch}\n"
+    ).format(stat=stat, patch=patch)
+
+
 def generate_with_gemini(prompt: str) -> Optional[str]:
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
@@ -87,21 +109,31 @@ def fallback_summary(stat: str) -> str:
     renamed = sum(1 for ln in lines if ln.startswith("R"))
     total = len(lines)
     top_files = ", ".join([ln.split("\t")[-1] for ln in lines[:3]])
-    head = "chore: update"
+    lang = os.environ.get("COMMIT_MSG_LANG", "zh").lower()
+    if lang == "en":
+        head = "chore: update"
+        detail = []
+        if total:
+            detail.append(f"- files: {total} (A{added}/M{modified}/D{deleted}/R{renamed})")
+        if top_files:
+            detail.append(f"- sample: {top_files}")
+        return "\n".join([head] + detail)
+    head = "chore: 更新"
     detail = []
     if total:
-        detail.append(f"- files: {total} (A{added}/M{modified}/D{deleted}/R{renamed})")
+        detail.append(f"- 文件数：{total}（A{added}/M{modified}/D{deleted}/R{renamed}）")
     if top_files:
-        detail.append(f"- sample: {top_files}")
+        detail.append(f"- 示例：{top_files}")
     return "\n".join([head] + detail)
 
 
 def main() -> int:
     stat, patch = collect_diff()
+    lang = os.environ.get("COMMIT_MSG_LANG", "zh").lower()
     if not stat and not patch:
-        print("chore: update (no staged changes)")
+        print("chore: 更新（无已暂存改动）" if lang != "en" else "chore: update (no staged changes)")
         return 0
-    prompt = PROMPT_TMPL.format(stat=stat, patch=patch)
+    prompt = build_prompt(stat, patch, lang)
     text = generate_with_gemini(prompt)
     if not text:
         text = fallback_summary(stat)
@@ -112,4 +144,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
