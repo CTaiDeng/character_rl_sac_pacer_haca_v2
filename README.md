@@ -2,8 +2,10 @@
 
 ---
 
-数学理论来源
+数学理论来源：
+
 https://mymetamathematics.blogspot.com/
+
 作者（GaoZheng）主页，欢迎访问
 
 ---
