@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
+r"""
 从 docs/*.md 提取“摘要”并在 README.md 文末维护索引。
 
 摘要来源优先级：
@@ -175,7 +175,7 @@ def main():
         if updated:
             updated_docs += 1
     upsert_readme_index(root, items)
-    print(f"[update_readme_index] 汇总 {len(items)} 篇文档，更新 {updated_docs} 篇缺失摘要的文档")
+    print(f"[update_readme_index] collected={len(items)} updated_missing_summaries={updated_docs}")
 
 
 if __name__ == '__main__':
