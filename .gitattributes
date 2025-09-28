@@ -1,0 +1,24 @@
+# Line-ending normalization and cross-platform EOL policy
+
+# Default: auto-detect text, prefer LF
+* text=auto eol=lf
+
+# Source code and scripts — force LF (avoids bash ^M and Python diffs)
+*.py       text eol=lf
+*.sh       text eol=lf
+.githooks/* text eol=lf
+
+# Markdown and docs — LF; encoding handled by scripts (UTF-8 BOM)
+*.md       text eol=lf
+
+# JSON/CSV and config files — LF for stable diffs
+*.json     text eol=lf
+*.csv      text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+
+# Windows-specific scripts keep CRLF
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+*.ps1      text eol=crlf
+
