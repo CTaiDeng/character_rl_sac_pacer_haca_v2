@@ -32,8 +32,9 @@ def read_text(path: str):
 
 
 def write_text(path: str, text: str, nl: str):
-    text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', nl)
-    with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+    # README 与 docs 写回统一使用 LF，避免 CRLF/LF 混用导致 Git 警告
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    with open(path, 'w', encoding='utf-8-sig', newline='\n') as f:
         f.write(text)
 
 

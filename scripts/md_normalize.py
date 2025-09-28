@@ -96,9 +96,9 @@ def read_text(path: str) -> Tuple[str, str]:
 
 
 def write_text(path: str, text: str, newline: str) -> None:
-    # 统一换行风格为原文件风格，编码写回 UTF-8 BOM
-    text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', newline)
-    with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+    # 始终写回 LF（与 .gitattributes: *.md text eol=lf 保持一致，避免 CRLF 警告）
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    with open(path, 'w', encoding='utf-8-sig', newline='\n') as f:
         f.write(text)
 
 

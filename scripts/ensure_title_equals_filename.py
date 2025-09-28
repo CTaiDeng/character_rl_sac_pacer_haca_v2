@@ -74,8 +74,9 @@ def read_text(path: Path) -> tuple[str, str]:
 
 
 def write_text(path: Path, text: str, nl: str) -> None:
-    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", nl)
-    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+    # 统一写回为 LF；与 .gitattributes 约定一致
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    with open(path, "w", encoding="utf-8-sig", newline="\n") as f:
         f.write(text)
 
 
@@ -122,4 +123,3 @@ def main(argv: List[str]) -> int:
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
-
