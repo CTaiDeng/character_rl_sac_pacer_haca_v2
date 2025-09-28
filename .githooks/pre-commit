@@ -20,7 +20,10 @@ else
   exit 1
 fi
 
-changed_md=( $(git diff --cached --name-only --diff-filter=ACMRTUXB | grep -E '\.md$' || true) )
+# Exclude historical archive from auto-maintenance
+changed_md=( $(git diff --cached --name-only --diff-filter=ACMRTUXB \
+  | grep -E '\.md$' \
+  | grep -v -E '^engineering_docs_archive/' || true) )
 
 if [ ${#changed_md[@]} -gt 0 ]; then
   echo "[pre-commit] Normalize Markdown: ${changed_md[*]}"

@@ -77,3 +77,26 @@
 - 在 `data/` 目录新增、删除、重命名文件（含脚本与数据集）时，必须同步更新 `data/README.md` 中的清单、分类与用途说明。
 - 若 `data/word_length_sets.json.union.lengths` 或示例语料的结构/分隔符发生变更，需同步更新相关设计文档与本清单的“生成物与来源”说明。
 - 涉及 CLI 的脚本（如 `catalog_lookup.py`、`gen_word_length_sets.py`、`jsonl_to_json.py`）应在 `data/README.md` 中给出最小可用示例命令。
+
+## 工程文档存档（engineering_docs_archive）
+
+- 目的：`engineering_docs_archive` 用于存放项目文档的历史版本快照，仅作为归档与检索使用。
+- 不自动维护：对该目录不执行自动规范化、标题校验或索引同步；预提交钩子已排除该目录下的 `.md` 文件。
+- 命名约定：归档文件以原名加版本尾缀 `_vMAJOR.MINOR.PATCH`，示例：`STEP_SCORING_v1.0.0.md`。
+- 索引范围：README 文末的“docs 摘要索引”仅覆盖 `docs/*.md`，不包含 `engineering_docs_archive`。
+- 操作建议：当根目录设计文档或 `docs` 文档发布新版本时，如需归档，请手动复制到 `engineering_docs_archive` 并按上述命名规范命名。
+
+## Markdown 文件扩展名约定
+
+- 统一使用小写 `.md` 作为 Markdown 扩展名。
+- 禁止使用 `.MD`、`.Md`、`.MkD` 等大小写或变体；存量文件需更名为 `.md`。
+- 工具链（预提交钩子与脚本）默认仅处理 `.md` 小写扩展名文件；大写扩展名不会参与自动规范化与索引。
+- 新增/迁移文档时，请自查扩展名是否符合本规范。
+
+## 工程文档（根目录）同步维护规范
+
+- 范围：`STEP_SCORING.md`、`NETWORK_TOPOLOGY.md`、`ITERATIVE_SUMMARY_TEMPLATE.md`、`ITERATION_GRANULARITY_DESIGN.md`、`INPUT_OUTPUT_SCHEME.md` 及 `PROJECT_DOCS_GUIDE.md`（本说明）。
+- 同步要求：上述任一文档发生方案/术语/接口/参数/流程变化时，需同步更新其他受影响文档与 `PROJECT_DOCS_GUIDE.md` 的对应说明条目。
+- 版本与归档：采用语义化版本；发布版本时，将 5 篇主文档复制到 `engineering_docs_archive/`（命名 `_vMAJOR.MINOR.PATCH.md`）。归档目录不做自动维护。
+- README 摘要索引：仅覆盖 `docs/*.md`；根目录工程文档与 `engineering_docs_archive` 不纳入该索引。
+- 提交信息约定：工程文档更新建议使用前缀 `docs:`，发布版本建议包含版本号，如 `docs: 发布工程文档 v1.0.1 并归档`。
