@@ -5,6 +5,9 @@ set -euo pipefail
 msg_file="$1"
 source_type="${2-}"
 
+# Resolve repo root early for venv detection
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
 # Skip only for merge/squash (let template/message go through if empty or 'update')
 case "$source_type" in
   merge|squash) exit 0;;
@@ -19,8 +22,14 @@ if [ -s "$msg_file" ]; then
   fi
 fi
 
-# Select python interpreter
-if command -v python3 >/dev/null 2>&1; then
+# Select python interpreter (prefer project venv)
+if [ -x "$repo_root/.venv/Scripts/python.exe" ]; then
+  PY="$repo_root/.venv/Scripts/python.exe"
+elif [ -x "$repo_root/.venv/bin/python3" ]; then
+  PY="$repo_root/.venv/bin/python3"
+elif [ -x "$repo_root/.venv/bin/python" ]; then
+  PY="$repo_root/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
   PY=python3
 elif command -v python >/dev/null 2>&1; then
   PY=python
@@ -39,7 +48,6 @@ else
   exit 0
 fi
 
-repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 # Enforce UTF-8 locale to avoid mojibake on Windows terminals
@@ -53,7 +61,7 @@ export LESSCHARSET=utf-8
 export GEMINI_API_KEY="${GEMINI_API_KEY-}"
 export GOOGLE_API_KEY="${GOOGLE_API_KEY-}"
 
-gen_out="$($PY scripts/gen_commit_msg_googleai.py 2>/dev/null || true)"
+gen_out="$("$PY" scripts/gen_commit_msg_googleai.py 2>/dev/null || true)"
 if [ -n "${gen_out//[[:space:]]/}" ]; then
   printf '%s\n' "$gen_out" > "$msg_file"
 fi

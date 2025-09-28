@@ -10,8 +10,14 @@ cd "$repo_root"
 export PYTHONUTF8=1
 export PYTHONIOENCODING=UTF-8
 
-# Prefer python3, fallback to python
-if command -v python3 >/dev/null 2>&1; then
+# Prefer project venv Python, then system python3/python
+if [ -x "$repo_root/.venv/Scripts/python.exe" ]; then
+  PY="$repo_root/.venv/Scripts/python.exe"
+elif [ -x "$repo_root/.venv/bin/python3" ]; then
+  PY="$repo_root/.venv/bin/python3"
+elif [ -x "$repo_root/.venv/bin/python" ]; then
+  PY="$repo_root/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
   PY=python3
 elif command -v python >/dev/null 2>&1; then
   PY=python
