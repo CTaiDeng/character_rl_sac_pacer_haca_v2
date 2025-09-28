@@ -6,6 +6,10 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Enforce UTF-8 to reduce mojibake on Windows
+export PYTHONUTF8=1
+export PYTHONIOENCODING=UTF-8
+
 # Prefer python3, fallback to python
 if command -v python3 >/dev/null 2>&1; then
   PY=python3
@@ -19,13 +23,13 @@ fi
 changed_md=( $(git diff --cached --name-only --diff-filter=ACMRTUXB | grep -E '\.md$' || true) )
 
 if [ ${#changed_md[@]} -gt 0 ]; then
-  echo "[pre-commit] 规范化 Markdown: ${changed_md[*]}"
+  echo "[pre-commit] Normalize Markdown: ${changed_md[*]}"
   "$PY" scripts/md_normalize.py "${changed_md[@]}" || true
-  echo "[pre-commit] 校验/对齐 docs 标题 = 文件名"
+  echo "[pre-commit] Ensure docs title matches filename"
   "$PY" scripts/ensure_title_equals_filename.py "${changed_md[@]}" || true
 fi
 
-echo "[pre-commit] 同步 README 文末 docs 摘要索引"
+echo "[pre-commit] Sync README docs summary index"
 "$PY" scripts/update_readme_index.py || true
 
 # 清理临时文件，避免被提交
