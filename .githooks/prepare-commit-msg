@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Git passes: $1 = commit message file, $2 = source (optional), $3 = sha (optional)
+msg_file="$1"
+source_type="${2-}"
+
+# Skip for merge/squash/rebase messages
+case "$source_type" in
+  merge|squash|commit|message) exit 0;;
+esac
+
+# If message already non-empty and not just 'update', keep user's content
+if [ -s "$msg_file" ]; then
+  if grep -qiE '^[[:space:]]*update[[:space:]]*$' "$msg_file"; then
+    : # will overwrite
+  else
+    exit 0
+  fi
+fi
+
+# Select python interpreter
+if command -v python3 >/dev/null 2>&1; then
+  PY=python3
+elif command -v python >/dev/null 2>&1; then
+  PY=python
+else
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# Use AI only if API key exists; script has fallback otherwise
+export GEMINI_API_KEY="${GEMINI_API_KEY-}"
+export GOOGLE_API_KEY="${GOOGLE_API_KEY-}"
+
+gen_out="$($PY scripts/gen_commit_msg_googleai.py 2>/dev/null || true)"
+if [ -n "${gen_out//[[:space:]]/}" ]; then
+  printf '%s\n' "$gen_out" > "$msg_file"
+fi
+
+exit 0
+
