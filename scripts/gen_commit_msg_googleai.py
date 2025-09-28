@@ -54,7 +54,7 @@ def build_prompt(stat: str, patch: str, lang: str) -> str:
     if lang == "en":
         return (
             "Please read the staged Git changes and produce a concise commit message.\n"
-            "- First line <= 60 chars in `type: subject`, type ∈ {feat, fix, docs, chore, refactor, test, perf, build, ci}.\n"
+            "- First line <= 60 chars in `type: subject`, type ∈ {{feat, fix, docs, chore, refactor, test, perf, build, ci}}.\n"
             "- Then list 1–3 bullet points, each one line starting with `- `.\n"
             "- Output in English only.\n\n"
             "Name-status list:\n{stat}\n\n"
@@ -63,7 +63,7 @@ def build_prompt(stat: str, patch: str, lang: str) -> str:
     # default zh
     return (
         "请根据以下 Git 已暂存改动，生成简洁的提交信息。\n"
-        "- 第一行不超过 60 字，形如 `type: subject`，type ∈ {feat, fix, docs, chore, refactor, test, perf, build, ci}。\n"
+        "- 第一行不超过 60 字，形如 `type: subject`，type ∈ {{feat, fix, docs, chore, refactor, test, perf, build, ci}}。\n"
         "- 其后最多列出 1–3 条要点，每条一行，以 `- ` 开头。\n"
         "- 必须仅用简体中文输出，不要夹杂英文。\n\n"
         "变更列表（name-status）：\n{stat}\n\n"
@@ -144,3 +144,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
