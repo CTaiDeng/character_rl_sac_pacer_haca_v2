@@ -70,6 +70,8 @@
 - 禁止将临时/对比用产物纳入版本库，提交前需清理：
   - `out_prev_readme.txt`（对比 README 旧版本时产生的临时文件）。
   - `out_block.txt`（导出 README 摘要索引块用于排查时产生的临时文件）。
+  - `last_gen_msg.txt`（生成提交信息时的调试/留存输出临时文件）。
+  - `TMP_COMMIT_MSG.txt`（模拟 prepare-commit-msg 钩子时的临时提交信息文件）。
 - `.gitignore` 已忽略上述文件；预提交钩子会在提交前自动删除该文件。
 
 ## 数据目录维护规范

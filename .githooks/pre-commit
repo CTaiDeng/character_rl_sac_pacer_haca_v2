@@ -38,6 +38,8 @@ echo "[pre-commit] Sync README docs summary index"
 # 清理临时文件，避免被提交
 rm -f out_prev_readme.txt 2>/dev/null || true
 rm -f out_block.txt 2>/dev/null || true
+rm -f last_gen_msg.txt 2>/dev/null || true
+rm -f TMP_COMMIT_MSG.txt 2>/dev/null || true
 
 # 将可能被脚本改动的文件重新加入暂存区
 git add README.md || true

@@ -42,6 +42,13 @@ fi
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Enforce UTF-8 locale to avoid mojibake on Windows terminals
+export PYTHONUTF8=1
+export PYTHONIOENCODING=UTF-8
+export LC_ALL=${LC_ALL:-C.UTF-8}
+export LANG=${LANG:-C.UTF-8}
+export LESSCHARSET=utf-8
+
 # Use AI only if API key exists; script has fallback otherwise
 export GEMINI_API_KEY="${GEMINI_API_KEY-}"
 export GOOGLE_API_KEY="${GOOGLE_API_KEY-}"
