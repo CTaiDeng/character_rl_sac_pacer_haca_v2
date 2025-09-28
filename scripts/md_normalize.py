@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
+r"""
 Markdown 正规化脚本（数学/代码格式实时审查）
 
 规则：
@@ -127,11 +127,11 @@ def main(argv: List[str]) -> int:
                 write_text(path, normalized, nl)
                 changed += 1
         except Exception as e:
-            print(f"[md_normalize] 跳过 {path}: {e}")
+            print(f"[md_normalize] skip {path}: {e}")
     if changed:
-        print(f"[md_normalize] 已规范化 {changed} 个 Markdown 文件")
+        print(f"[md_normalize] normalized {changed} markdown file(s)")
     else:
-        print("[md_normalize] 无需更改")
+        print("[md_normalize] no change")
     return 0
 
 
