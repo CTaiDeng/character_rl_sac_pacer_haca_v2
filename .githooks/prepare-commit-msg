@@ -5,9 +5,9 @@ set -euo pipefail
 msg_file="$1"
 source_type="${2-}"
 
-# Skip for merge/squash/rebase messages
+# Skip only for merge/squash (let template/message go through if empty or 'update')
 case "$source_type" in
-  merge|squash|commit|message) exit 0;;
+  merge|squash) exit 0;;
 esac
 
 # If message already non-empty and not just 'update', keep user's content
@@ -25,6 +25,17 @@ if command -v python3 >/dev/null 2>&1; then
 elif command -v python >/dev/null 2>&1; then
   PY=python
 else
+  # Minimal shell fallback when Python is unavailable
+  stat="$(git diff --staged --name-status || true)"
+  if [ -n "${stat//[[:space:]]/}" ]; then
+    top3="$(printf '%s\n' "$stat" | awk '{print $NF}' | head -n 3 | paste -sd ', ' -)"
+    {
+      printf '%s\n' "chore: update"
+      [ -n "$top3" ] && printf -- '- sample: %s\n' "$top3"
+    } > "$msg_file"
+  else
+    printf '%s\n' "chore: update (no staged changes)" > "$msg_file"
+  fi
   exit 0
 fi
 
@@ -41,4 +52,3 @@ if [ -n "${gen_out//[[:space:]]/}" ]; then
 fi
 
 exit 0
-
