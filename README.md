@@ -6,7 +6,7 @@
 
 https://mymetamathematics.blogspot.com/
 
-作者（GaoZheng）主页，欢迎访问  
+作者（GaoZheng）主页，欢迎访问
 
 ---
 
