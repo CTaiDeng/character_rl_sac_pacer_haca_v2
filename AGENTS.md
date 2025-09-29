@@ -1,11 +1,48 @@
-# 开发协议
+# AGENTS 指南（仓库内优先级指令｜唯一规范来源）
 
-- 给出当前的 step 打分方案并写入根目录下的专门 Markdown 文件，文件需使用简体中文并辅以数学符号与伪代码描述。
-- 当打分方案发生变化时，必须同步更新该 Markdown 文件中的内容。
-- 给出当前的输入-输出数据方案并写入根目录下的专门 Markdown 文件，文件需使用简体中文并辅以数学语言和伪代码描述。
-- 当输入-输出数据方案发生变化时，必须同步更新该 Markdown 文件中的内容。
-- 给出当前的网络拓扑结构设计方案并写入根目录下的专门 Markdown 文件，文件需使用简体中文并辅以数学语言和伪代码描述。
-- 当网络拓扑结构设计方案发生变化时，必须同步更新该 Markdown 文件中的内容。
+> 作用域：仓库根目录（含全部子目录）；本文件为代理在仓内工作的首要指引与规范汇总。
+
+- 对话语言：所有协作一律使用“简体中文”。
+- 规范优先：本文件为唯一规范来源；“开发协议与规范”章节已并入（原 PROJECT_DOCS_GUIDE.md 已合并并删除）。
+- 工程文档位置：工程类文档统一放在 `engineering_docs/` 中管理：
+  - 当前版本：`engineering_docs/engineering_docs_current/`
+  - 历史归档：`engineering_docs/engineering_docs_archive/`
+- README 摘要索引：根 `README.md` 文末的“docs 摘要索引”仅索引 `docs/*.md`；不覆盖 `engineering_docs/*`。
+- Markdown 约定：遵循“开发协议与规范”的数学/代码规范；行间数学用 `$$ … $$`，行内用 `$ … $`，围栏代码块内不做转换。
+- 同步要求：当以下方案变更时，需同步更新 `engineering_docs/engineering_docs_current/` 对应工程文档，并在必要时复制至归档：
+  - `STEP_SCORING.md`（Step 打分方案）
+  - `INPUT_OUTPUT_SCHEME.md`（输入-输出数据方案）
+  - `NETWORK_TOPOLOGY.md`（网络拓扑结构方案）
+
+**关键规范摘要**
+- 开发协议：三份方案文档需使用简体中文，配数学语言与伪代码；发生变更时必须同步更新。
+- 文档摘要同步：`docs/*.md` 顶部维护“摘要”块；`README.md` 文末维护统一索引；任一侧调整需双向同步。
+- 对齐流程：新增/重命名/迁移 `docs` 后执行 `python scripts/align_docs.py` 重写时间戳前缀、更新日期行、重建 README 索引并规范化 Markdown。
+- Markdown 规范：行间 `$$ … $$`、行内 `$ … $`；围栏代码块不转换；行内代码使用反引号。
+- 编码与行尾：统一 UTF-8（带 BOM）+ LF。
+
+**常用指令**
+- 对齐脚本：`python scripts/align_docs.py`
+- 预提交钩子：`git config core.hooksPath .githooks`（提交前自动规范化已暂存的 `.md` 并同步 README 索引）
+
+---
+
+# 开发协议与规范（原 PROJECT_DOCS_GUIDE.md 内容）
+
+> 说明：本节为原 `PROJECT_DOCS_GUIDE.md` 的完整内容，现已合并至 AGENTS.md 并作为唯一来源维护。
+
+> 摘要：本文定义本项目的统一开发协议、文档规范、摘要同步机制、对齐流程、Markdown 数学/代码格式化标准、演示与环境约定、临时文件清理、数据目录维护、工程文档归档策略、扩展名约定与工程文档同步维护要求。工程类设计文档集中放置于 `engineering_docs/`：当前版本位于 `engineering_docs/engineering_docs_current/`，历史归档位于 `engineering_docs/engineering_docs_archive/`。当 Step 打分方案、输入-输出方案或网络拓扑方案发生调整时，必须同步更新对应工程文档，并按需归档。README 文末索引仅覆盖 `docs/*.md`，与工程文档互不干扰。
+
+## 开发协议
+
+对应工程文档（当前版本）清单：
+
+- `engineering_docs/engineering_docs_current/STEP_SCORING.md`
+- `engineering_docs/engineering_docs_current/INPUT_OUTPUT_SCHEME.md`
+- `engineering_docs/engineering_docs_current/NETWORK_TOPOLOGY.md`
+- `engineering_docs/engineering_docs_current/ITERATIVE_SUMMARY_TEMPLATE.md`
+- `engineering_docs/engineering_docs_current/ITERATION_GRANULARITY_DESIGN.md`
+- `engineering_docs/engineering_docs_current/DATA_TOOLS.md`
 
 ## 文档摘要同步规范
 
@@ -15,7 +52,7 @@
 - 任何一侧（`docs` 内文或 `README.md` 索引）摘要发生调整时，必须同步更新另一侧，保持一致。
 - 新增或重命名文档时，应同时在 `README.md` 的摘要索引中增删对应条目。
 - 禁止维护 `docs/SUMMARIES.md` 等独立摘要清单，避免三方不同步。
-- 文档编码统一为 UTF-8（带 BOM），并统一写回 LF 行尾（跨平台一致，避免 CRLF 警告），以减少跨平台显示乱码。
+- 文档编码统一为 UTF-8（带 BOM），并统一写回 LF 行尾（跨平台一致，避免 CRLF 警告）。
 
 ## 文档对齐指令与整理流程（docs/*）
 
@@ -80,13 +117,13 @@
 - 若 `data/word_length_sets.json.union.lengths` 或示例语料的结构/分隔符发生变更，需同步更新相关设计文档与本清单的“生成物与来源”说明。
 - 涉及 CLI 的脚本（如 `catalog_lookup.py`、`gen_word_length_sets.py`、`jsonl_to_json.py`）应在 `data/README.md` 中给出最小可用示例命令。
 
-## 工程文档存档（engineering_docs_archive）
+## 工程文档目录与存档（engineering_docs）
 
-- 目的：`engineering_docs_archive` 用于存放项目文档的历史版本快照，仅作为归档与检索使用。
-- 不自动维护：对该目录不执行自动规范化、标题校验或索引同步；预提交钩子已排除该目录下的 `.md` 文件。
+- 当前版本：`engineering_docs/engineering_docs_current/` 存放 5 篇工程文档的最新版本。
+- 历史归档：`engineering_docs/engineering_docs_archive/` 用于存放项目文档的历史版本快照，仅作为归档与检索使用；不做自动维护。
 - 命名约定：归档文件以原名加版本尾缀 `_vMAJOR.MINOR.PATCH`，示例：`STEP_SCORING_v1.0.0.md`。
-- 索引范围：README 文末的“docs 摘要索引”仅覆盖 `docs/*.md`，不包含 `engineering_docs_archive`。
-- 操作建议：当根目录设计文档或 `docs` 文档发布新版本时，如需归档，请手动复制到 `engineering_docs_archive` 并按上述命名规范命名。
+- README 摘要索引：仅覆盖 `docs/*.md`，不包含 `engineering_docs/*`。
+- 操作建议：当工程文档发布新版本时，请手动复制到归档目录并按上述命名规范命名。
 
 ## Markdown 文件扩展名约定
 
@@ -95,10 +132,14 @@
 - 工具链（预提交钩子与脚本）默认仅处理 `.md` 小写扩展名文件；大写扩展名不会参与自动规范化与索引。
 - 新增/迁移文档时，请自查扩展名是否符合本规范。
 
-## 工程文档（根目录）同步维护规范
+## 工程文档（engineering_docs）同步维护规范
 
-- 范围：`STEP_SCORING.md`、`NETWORK_TOPOLOGY.md`、`ITERATIVE_SUMMARY_TEMPLATE.md`、`ITERATION_GRANULARITY_DESIGN.md`、`INPUT_OUTPUT_SCHEME.md` 及 `PROJECT_DOCS_GUIDE.md`（本说明）。
-- 同步要求：上述任一文档发生方案/术语/接口/参数/流程变化时，需同步更新其他受影响文档与 `PROJECT_DOCS_GUIDE.md` 的对应说明条目。
-- 版本与归档：采用语义化版本；发布版本时，将 5 篇主文档复制到 `engineering_docs_archive/`（命名 `_vMAJOR.MINOR.PATCH.md`）。归档目录不做自动维护。
-- README 摘要索引：仅覆盖 `docs/*.md`；根目录工程文档与 `engineering_docs_archive` 不纳入该索引。
+- 范围：`engineering_docs/engineering_docs_current/` 下的 5 篇主文档与本说明。
+- 同步要求：上述任一文档发生方案/术语/接口/参数/流程变化时，需同步更新其他受影响文档与本节（开发协议与规范）的对应说明条目。
+- 版本与归档：采用语义化版本；发布版本时，将 5 篇主文档复制到 `engineering_docs/engineering_docs_archive/`（命名 `_vMAJOR.MINOR.PATCH.md`）。归档目录不做自动维护。
+- README 摘要索引：仅覆盖 `docs/*.md`；工程文档与归档不纳入该索引。
 - 提交信息约定：工程文档更新建议使用前缀 `docs:`，发布版本建议包含版本号，如 `docs: 发布工程文档 v1.0.1 并归档`。
+
+---
+
+系统提示：本仓库与代理交互统一使用“简体中文”。
