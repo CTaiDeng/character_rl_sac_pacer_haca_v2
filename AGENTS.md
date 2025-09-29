@@ -143,3 +143,13 @@
 ---
 
 系统提示：本仓库与代理交互统一使用“简体中文”。
+
+## 自动注释注入规则（docs/*）
+- 触发条件：当 docs/*.md 正文任意位置出现以下关键词之一时，自动在“日期：YYYY-MM-DD”下一行插入统一注释：
+  - O3理论、O3元数学理论、主纤维丛版广义非交换李代数、PFB-GNLA
+- 注释内容：
+  #### ***注：“O3理论/O3元数学理论/主纤维丛版广义非交换李代数(PFB-GNLA)”相关理论参见： [作者（GaoZheng）网盘分享](https://drive.google.com/drive/folders/1lrgVtvhEq8cNal0Aa0AjeCNQaRA8WERu?usp=sharing) 或 [作者（GaoZheng）主页](https://mymetamathematics.blogspot.com)***
+- 执行位置：由 scripts/align_docs.py 调用 scripts/insert_o3_citation_note.py 在日期行下方插入；已存在同样注释时不重复插入；若缺少日期行则退化为插入在首个标题后一行。
+
+## 临时文件与清理规范（补充）
+- out_align_docs_prev.txt：对齐脚本运行时可能生成的临时对比文件；已加入 .gitignore 忽略，并在预提交钩子 .githooks/pre-commit 中自动删除，避免误提交。

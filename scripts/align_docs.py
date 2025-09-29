@@ -36,6 +36,8 @@ def main() -> int:
     rc = 0
     rc |= run([sys.executable, str(ROOT / 'scripts' / 'rename_docs_to_git_ts.py')])
     rc |= run([sys.executable, str(ROOT / 'scripts' / 'insert_doc_date_from_prefix.py')])
+    # 在日期行下方按需插入 O3 理论注释
+    rc |= run([sys.executable, str(ROOT / 'scripts' / 'insert_o3_citation_note.py')])
     rc |= run([sys.executable, str(ROOT / 'scripts' / 'update_readme_index.py')])
     # 清理索引中可能遗留的 $\texttt{...}$ 样式，统一为反引号
     rc |= run([sys.executable, str(ROOT / 'scripts' / 'fix_readme_index_style.py')])
