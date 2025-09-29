@@ -1,5 +1,6 @@
 ﻿# 基于传统数学语言的形式化：PFB-GNLA 退化 × 词法KAT作用幺半群 × GRL路径积分中的“价值偏好向量与微分动力量子”
 日期：2025-09-26
+#### ***注：“O3理论/O3元数学理论/主纤维丛版广义非交换李代数(PFB-GNLA)”相关理论参见： [作者（GaoZheng）网盘分享](https://drive.google.com/drive/folders/1lrgVtvhEq8cNal0Aa0AjeCNQaRA8WERu?usp=sharing) 或 [作者（GaoZheng）主页](https://mymetamathematics.blogspot.com)***
 
 > 摘要：介绍 Kleene Algebra with Tests（KAT）与相关闭包/半环结构在本项目中的角色：用以建模可验证控制流、停机点与合规模式。提供从数学结构到工程接口的映射规范，支撑规则检查、代价累积与策略约束的统一表达。
 
