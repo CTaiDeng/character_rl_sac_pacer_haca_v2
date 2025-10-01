@@ -20,7 +20,9 @@ Markdown 正规化脚本（数学/代码格式实时审查）
 import os
 import re
 import sys
+from pathlib import Path
 from typing import List, Tuple
+from _docs_config import load_skip_paths, is_under
 
 
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
@@ -102,14 +104,27 @@ def write_text(path: str, text: str, newline: str) -> None:
         f.write(text)
 
 
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+SKIP_PATHS = load_skip_paths(Path(ROOT))
+
+
 def find_all_md(root: str) -> List[str]:
     out: List[str] = []
     skip_dirs = {'.git', '.idea', 'out', 'dist', 'build', '__pycache__'}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+        # 目录级跳过（内置目录 + 配置白名单）
+        def _keep_dir(d: str) -> bool:
+            if d in skip_dirs:
+                return False
+            absd = os.path.abspath(os.path.join(dirpath, d))
+            return not is_under(Path(absd), SKIP_PATHS)
+
+        dirnames[:] = [d for d in dirnames if _keep_dir(d)]
         for fn in filenames:
             if fn.lower().endswith('.md'):
-                out.append(os.path.join(dirpath, fn))
+                p = os.path.join(dirpath, fn)
+                if not is_under(Path(p), SKIP_PATHS):
+                    out.append(p)
     return out
 
 
@@ -119,6 +134,9 @@ def main(argv: List[str]) -> int:
     changed = 0
     for path in files:
         if not os.path.isfile(path):
+            continue
+        # 单文件入口也按白名单跳过
+        if is_under(Path(path), SKIP_PATHS):
             continue
         try:
             original, nl = read_text(path)

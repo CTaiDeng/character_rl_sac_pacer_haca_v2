@@ -214,3 +214,6 @@ __marimo__/
 out_prev_readme.txt
 out_block.txt
 out_align_docs_prev.txt
+
+# Local symlink/junction to external kernel_reference directory
+docs/kernel_reference/

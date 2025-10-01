@@ -17,9 +17,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import re
+from _docs_config import load_skip_paths, is_under
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / 'docs'
+SKIP_PATHS = load_skip_paths(ROOT)
 
 KEYWORDS = (
     'O3理论',
@@ -87,6 +89,9 @@ def main(argv: list[str]) -> int:
     for p in base.rglob('*.md'):
         # 仅处理 docs 目录下的小写 .md
         if p.is_file():
+            # 按白名单跳过指定路径
+            if is_under(p, SKIP_PATHS):
+                continue
             try:
                 if process_file(p):
                     changed += 1
@@ -98,4 +103,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == '__main__':
     raise SystemExit(main(sys.argv))
-

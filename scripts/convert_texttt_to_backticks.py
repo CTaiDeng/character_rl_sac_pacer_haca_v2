@@ -16,10 +16,16 @@
 import os
 import re
 import sys
+from pathlib import Path
 from typing import List, Tuple
+from _docs_config import load_skip_paths, is_under
 
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 TEXTTT_RE = re.compile(r"\$\s*\\texttt\{([^}]+)\}\s*\$")
+
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+SKIP_PATHS = load_skip_paths(Path(ROOT))
 
 
 def read_text(path: str) -> Tuple[str, str]:
@@ -86,10 +92,19 @@ def find_all_md(root: str) -> List[str]:
     out: List[str] = []
     skip = {'.git', '.idea', 'out', 'dist', 'build', '__pycache__'}
     for dp, dns, fns in os.walk(root):
-        dns[:] = [d for d in dns if d not in skip]
+        # 目录级跳过（内置目录 + 配置白名单）
+        def _keep_dir(d: str) -> bool:
+            if d in skip:
+                return False
+            absd = os.path.abspath(os.path.join(dp, d))
+            return not is_under(Path(absd), SKIP_PATHS)
+
+        dns[:] = [d for d in dns if _keep_dir(d)]
         for fn in fns:
             if fn.lower().endswith('.md'):
-                out.append(os.path.join(dp, fn))
+                p = os.path.join(dp, fn)
+                if not is_under(Path(p), SKIP_PATHS):
+                    out.append(p)
     return out
 
 
@@ -99,6 +114,9 @@ def main(argv: List[str]) -> int:
     changed = 0
     for p in files:
         if not os.path.isfile(p):
+            continue
+        # 单文件入口也按白名单跳过
+        if is_under(Path(p), SKIP_PATHS):
             continue
         try:
             if process_file(p):
@@ -111,4 +129,3 @@ def main(argv: List[str]) -> int:
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
-
