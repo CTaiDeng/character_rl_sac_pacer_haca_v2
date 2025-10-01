@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 from typing import Optional
+from commit_filters import collect_diff_filtered
 
 
 def run(cmd: list[str]) -> str:
@@ -128,7 +129,9 @@ def fallback_summary(stat: str) -> str:
 
 
 def main() -> int:
-    stat, patch = collect_diff()
+    # 读取配置白名单/黑名单，对已暂存改动进行前缀过滤
+    # 若配置缺失或异常，内部会自动回退为不过滤或仅依据 skip_paths 排除
+    stat, patch = collect_diff_filtered()
     lang = os.environ.get("COMMIT_MSG_LANG", "zh").lower()
     if not stat and not patch:
         print("chore: 更新（无已暂存改动）" if lang != "en" else "chore: update (no staged changes)")

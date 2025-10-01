@@ -76,7 +76,7 @@
 ---
 
 ## 提交信息与其他
-- `gen_commit_msg_googleai.py`：用 Gemini 读取已暂存 diff 生成提交信息（若无凭据则回退到本地摘要）
+- `gen_commit_msg_googleai.py`：用 Gemini 读取已暂存 diff 生成提交信息（若无凭据则回退到本地摘要）。支持通过 `scripts/docs_processing_config.json` 的 `commit_msg_include_prefixes`/`commit_msg_exclude_prefixes` 进行路径前缀过滤；若未配置排除清单，默认复用 `skip_paths` 进行排除（如 `docs/kernel_reference/`）。
   - 环境：设置 `GEMINI_API_KEY` 或 `GOOGLE_API_KEY`；可选 `GEMINI_MODEL`（默认 `gemini-1.5-flash`）
   - 用法：`python scripts/gen_commit_msg_googleai.py`
 
@@ -98,4 +98,3 @@
 ## 约定
 - 编码与行尾：统一 UTF‑8（带 BOM）+ LF。
 - 自动化：预提交钩子会规范化已暂存的 `.md` 并更新 README 摘要索引；详见 `AGENTS.md`。
-

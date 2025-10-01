@@ -1,6 +1,7 @@
 {
   "skip_paths": [
     "docs/kernel_reference"
-  ]
+  ],
+  "commit_msg_include_prefixes": [],
+  "commit_msg_exclude_prefixes": []
 }
-
