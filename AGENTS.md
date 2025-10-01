@@ -159,3 +159,4 @@
 - 只读引用目录：`docs/kernel_reference/` 指向外部源，属于知识库的只读引用，不纳入本项目的维护、索引与任何自动修改；不得写入或改动其内容。
 - 索引范围：`README.md` 文末“docs 摘要索引”不包含 `docs/kernel_reference/`。
 - 脚本约束：所有递归遍历/修改 Markdown 的脚本必须跳过该目录并视为只读。统一通过 `scripts/docs_processing_config.json` 的 `skip_paths` 管理（默认已包含 `docs/kernel_reference/`）。对齐流程中涉及的 `scripts/md_normalize.py`、`scripts/convert_texttt_to_backticks.py`、`scripts/insert_o3_citation_note.py` 等脚本遵循该白名单；而仅处理 `docs/*.md` 顶层文件的 `scripts/rename_docs_to_git_ts.py`、`scripts/insert_doc_date_from_prefix.py`、`scripts/update_readme_index.py` 本身不会进入该目录。
+- AI 助手引用范围：在与 Codex 或其他 AI 助手协作时，如未明确限定“知识库”范围，应默认将 `docs/` 及其所有递归子目录的文档一并纳入参考范围（包含只读目录 `docs/kernel_reference/`）；仅编辑、索引与自动修改保持对 `docs/kernel_reference/` 的只读约束不变。
