@@ -17,13 +17,32 @@
 import os
 import sys
 import subprocess
+import platform
+from typing import List
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(cmd: list[str]) -> int:
+def _resolve_venv_python() -> str:
+    """Prefer repo local venv interpreter.
+
+    - On Windows: .venv\Scripts\python.exe
+    - On POSIX:   .venv/bin/python
+    - Fallback:   current sys.executable
+    """
+    win_path = ROOT / ".venv" / "Scripts" / "python.exe"
+    posix_path = ROOT / ".venv" / "bin" / "python"
+    # Prefer Windows path when running on Windows（满足用户要求）
+    if platform.system().lower().startswith("win") and win_path.exists():
+        return str(win_path)
+    if posix_path.exists() and os.access(posix_path, os.X_OK):
+        return str(posix_path)
+    return sys.executable
+
+
+def run(cmd: List[str]) -> int:
     try:
         print("[align_docs] $", " ".join(cmd))
         return subprocess.call(cmd, cwd=str(ROOT))
@@ -34,18 +53,19 @@ def run(cmd: list[str]) -> int:
 
 def main() -> int:
     rc = 0
-    rc |= run([sys.executable, str(ROOT / 'scripts' / 'rename_docs_to_git_ts.py')])
-    rc |= run([sys.executable, str(ROOT / 'scripts' / 'insert_doc_date_from_prefix.py')])
+    py = _resolve_venv_python()
+    rc |= run([py, str(ROOT / 'scripts' / 'rename_docs_to_git_ts.py')])
+    rc |= run([py, str(ROOT / 'scripts' / 'insert_doc_date_from_prefix.py')])
     # 在日期行下方按需插入 O3 理论注释
-    rc |= run([sys.executable, str(ROOT / 'scripts' / 'insert_o3_citation_note.py')])
-    rc |= run([sys.executable, str(ROOT / 'scripts' / 'update_readme_index.py')])
+    rc |= run([py, str(ROOT / 'scripts' / 'insert_o3_citation_note.py')])
+    rc |= run([py, str(ROOT / 'scripts' / 'update_readme_index.py')])
     # 清理索引中可能遗留的 $\texttt{...}$ 样式，统一为反引号
-    rc |= run([sys.executable, str(ROOT / 'scripts' / 'fix_readme_index_style.py')])
+    rc |= run([py, str(ROOT / 'scripts' / 'fix_readme_index_style.py')])
     # 全仓清理 $\texttt{...}$ → `...`
-    rc |= run([sys.executable, str(ROOT / 'scripts' / 'convert_texttt_to_backticks.py')])
+    rc |= run([py, str(ROOT / 'scripts' / 'convert_texttt_to_backticks.py')])
     # 规范化 README 与 docs
-    rc |= run([sys.executable, str(ROOT / 'scripts' / 'md_normalize.py'), 'README.md'])
-    rc |= run([sys.executable, str(ROOT / 'scripts' / 'md_normalize.py'), 'docs'])
+    rc |= run([py, str(ROOT / 'scripts' / 'md_normalize.py'), 'README.md'])
+    rc |= run([py, str(ROOT / 'scripts' / 'md_normalize.py'), 'docs'])
     if rc == 0:
         print('[align_docs] 文档对齐完成')
     else:

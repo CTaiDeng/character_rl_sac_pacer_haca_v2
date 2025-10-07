@@ -48,7 +48,7 @@
   - 转换：`$$...$$→$$...$$`，`$...$→$...$`；不改动代码围栏内部；`\cdot` 规范为 `\cdot`
   - 用法：`python scripts/md_normalize.py [README.md docs/a.md ...]`（缺省全仓 `.md`）
 
-- `convert_texttt_to_backticks.py`：将围栏外 `$\texttt{...}$` 统一替换为反引号 `...`
+- `convert_texttt_to_backticks.py`：将围栏外 ``...`` 统一替换为反引号 `...`
   - 用法：`python scripts/convert_texttt_to_backticks.py [<files...>]`
 
 - `fix_texttt.py`：修复 README 中 `$ texttt{...}` 等异常写法为标准 `$\texttt{...}`
