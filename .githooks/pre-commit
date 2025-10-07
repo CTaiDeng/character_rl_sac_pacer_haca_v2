@@ -26,7 +26,18 @@ else
   exit 1
 fi
 
-# Exclude historical archive from auto-maintenance
+# Enforce docs prefix uniqueness and sync date/notes before collecting staged files
+echo "[pre-commit] Enforce docs prefix uniqueness"
+"$PY" scripts/rename_docs_to_git_ts.py || true
+echo "[pre-commit] Ensure doc date line from prefix"
+"$PY" scripts/insert_doc_date_from_prefix.py || true
+echo "[pre-commit] Insert O3 citation notes if needed"
+"$PY" scripts/insert_o3_citation_note.py || true
+
+# Stage docs changes (renames/content) before diffing staged set
+git add docs || true
+
+# Collect changed markdown after enforcement
 changed_md=( $(git diff --cached --name-only --diff-filter=ACMRTUXB \
   | grep -E '\.md$' \
   | grep -v -E '^engineering_docs_archive/' || true) )
