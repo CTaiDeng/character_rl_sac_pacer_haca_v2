@@ -1,37 +1,40 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2025 GaoZheng
-# 
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, version 3.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see https://www.gnu.org/licenses/.
-
 
 """
-将 docs 目录下形如 <ts>_*.md 的文档前缀重写为该文件在 Git 中的首次入库时间（秒）。
+重写文档文件名前缀为“文件创建时间（秒）”，并在秒级冲突时按标题名降序依次向前一秒分配。
 
-命名规范：
-- 前缀（秒级时间戳）必须全局唯一，视作“文章ID”。
-- 若同时入库导致冲突（相同秒），则对后续文件按“后退 1 秒”逐次分配：ts-1、ts-2、…
-- 仅处理顶层 docs 中满足 ^\d+_.*\.md$ 的文件；不递归，不进入只读引用目录。
+范围（仅顶层，不递归）：
+- docs/
+- my_docs/project_docs/
+- my_project/gmx_split_20250924_011827/docs/
+
+规则：
+- 仅处理匹配 "^\d+_.*\.md$" 的 Markdown 文件。
+- 目标秒时间戳取自文件创建时间（Windows 下 st_ctime；若获取失败回退到 mtime）。
+- 一旦创建确定后不再变更；仅当同秒出现多个文件时，组内按标题名（去前缀与扩展名）降序排序，依次分配 ts, ts-1, ts-2, ...。
 """
+
+from __future__ import annotations
 
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple, Set
+from typing import Dict, List, Optional, Set, Tuple
 from uuid import uuid4
+
+
+ROOT = Path(__file__).resolve().parents[1]
+TARGET_DIRS = [
+    ROOT / 'docs',
+    ROOT / 'my_docs' / 'project_docs',
+    ROOT / 'my_project' / 'gmx_split_20250924_011827' / 'docs',
+]
+
+NAME_RE = re.compile(r'^(\d+)_([\s\S]+)\.md$', re.IGNORECASE)
 
 
 def safe_print(*args):
@@ -45,37 +48,14 @@ def safe_print(*args):
             pass
 
 
-ROOT = Path(__file__).resolve().parents[1]
-DOCS_DIR = ROOT / 'docs'
-NAME_RE = re.compile(r'^(\d+)_([\s\S]+\.md)$', re.IGNORECASE)
-
-
-def git_added_epoch_seconds(path: Path) -> Optional[int]:
+def creation_epoch_seconds(path: Path) -> Optional[int]:
     try:
-        out = subprocess.check_output(
-            ['git', 'log', '--diff-filter=A', '--follow', '--format=%at', '-n', '1', str(path)],
-            cwd=str(ROOT),
-            stderr=subprocess.DEVNULL,
-        )
-        s = out.decode('utf-8', errors='ignore').strip()
-        if not s:
-            return None
-        return int(s.splitlines()[0].strip())
+        return int(path.stat().st_ctime)
     except Exception:
-        return None
-
-
-def load_existing_used_ts(files: List[Path]) -> Set[int]:
-    used: Set[int] = set()
-    for p in files:
-        m = NAME_RE.match(p.name)
-        if not m:
-            continue
         try:
-            used.add(int(m.group(1)))
+            return int(path.stat().st_mtime)
         except Exception:
-            pass
-    return used
+            return None
 
 
 def allocate_unique_ts(desired_ts: int, used: Set[int]) -> int:
@@ -87,29 +67,30 @@ def allocate_unique_ts(desired_ts: int, used: Set[int]) -> int:
 
 
 def plan_new_paths(files: List[Path]) -> Dict[Path, Path]:
-    entries: List[Tuple[Path, str, int]] = []  # (path, rest, desired_ts)
+    # 收集 (path, title, desired_ts)
+    entries: List[Tuple[Path, str, int]] = []
     for p in files:
         m = NAME_RE.match(p.name)
         if not m:
             continue
-        rest = m.group(2)
-        ts = git_added_epoch_seconds(p)
+        title = m.group(2)  # 不含 .md
+        ts = creation_epoch_seconds(p)
         if ts is None:
             try:
                 ts = int(m.group(1))
             except Exception:
                 continue
-        entries.append((p, rest, ts))
+        entries.append((p, title, ts))
 
-    # deterministic ordering: ts asc, filename asc
-    entries.sort(key=lambda x: (x[2], x[0].name))
+    # 确定性排序：先按标题降序，再按 ts 升序（稳定排序实现“同秒内按标题降序”）
+    entries.sort(key=lambda x: x[1], reverse=True)
+    entries.sort(key=lambda x: x[2])
 
-    # 从空集开始分配，确保“同秒入库”时首个条目保留原秒，其余依次后退
     used_ts: Set[int] = set()
     mapping: Dict[Path, Path] = {}
-    for p, rest, desired in entries:
+    for p, title, desired in entries:
         final_ts = allocate_unique_ts(desired, used_ts)
-        new_name = f"{final_ts}_{rest}"
+        new_name = f"{final_ts}_{title}.md"
         mapping[p] = p.with_name(new_name)
     return mapping
 
@@ -130,7 +111,7 @@ def perform_renames(mapping: Dict[Path, Path]) -> Tuple[int, int]:
                     os.replace(src, dst)
                     changed += 1
                 except Exception as e:
-                    safe_print(f"[ERROR] 重命名失败: {src.name} -> {dst.name}: {e}")
+                    safe_print(f"[ERROR] move failed: {src.name} -> {dst.name}: {e}")
                 pending.pop(src, None)
                 progressed = True
         if progressed:
@@ -143,7 +124,7 @@ def perform_renames(mapping: Dict[Path, Path]) -> Tuple[int, int]:
         try:
             os.replace(src, tmp)
         except Exception as e:
-            safe_print(f"[ERROR] 临时重命名失败: {src.name} -> {tmp.name}: {e}")
+            safe_print(f"[ERROR] tmp move failed: {src.name} -> {tmp.name}: {e}")
             pending.pop(src, None)
             skipped += 1
             continue
@@ -154,15 +135,20 @@ def perform_renames(mapping: Dict[Path, Path]) -> Tuple[int, int]:
 
 
 def main() -> int:
-    if not DOCS_DIR.is_dir():
-        safe_print(f"[rename_docs_to_git_ts] 未找到目录：{DOCS_DIR}")
-        return 1
-    files = sorted([p for p in DOCS_DIR.iterdir() if p.is_file() and p.suffix.lower() == '.md'])
-    mapping = plan_new_paths(files)
-    changed, skipped = perform_renames(mapping)
-    safe_print(f"[rename_docs_to_git_ts] 重命名完成：{changed} 个，跳过 {skipped} 个。")
+    total_changed = 0
+    total_skipped = 0
+    for d in TARGET_DIRS:
+        if not (d.exists() and d.is_dir()):
+            continue
+        files = sorted([p for p in d.iterdir() if p.is_file() and p.suffix.lower() == '.md'])
+        mapping = plan_new_paths(files)
+        changed, skipped = perform_renames(mapping)
+        total_changed += changed
+        total_skipped += skipped
+    safe_print(f"[rename_docs_to_git_ts] done: changed={total_changed} skipped={total_skipped}")
     return 0
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    raise SystemExit(main())
+

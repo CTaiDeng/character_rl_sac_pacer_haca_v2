@@ -64,9 +64,9 @@
   - 若该位置已有“日期：”行，则就地更新。
 - 对齐指令入口：`python scripts/align_docs.py`
   - 依次执行：
-    1) `scripts/rename_docs_to_git_ts.py`（重写时间戳前缀）；
-    2) `scripts/insert_doc_date_from_prefix.py`（写入/更新日期行）；
-    3) `scripts/insert_o3_citation_note.py`（按关键词插入 O3 注释）；
+    1) `scripts/ensure_docs_style_from_date.py`（根据文内“日期”与标题规范文首样式，并将文件名重命名为“时间戳_标题.md”，其中时间戳取文内日期的本地 00:00:00 秒；同日冲突按标题名降序依次向前一秒分配）；
+    2) `scripts/insert_o3_citation_note.py`（按关键词插入 O3 注释）；
+    3) `scripts/force_docs_utf8_bom.py`（强制 docs 顶层 `.md` 重写为 UTF-8（BOM）+ LF，修复潜在中文乱码）；
     4) `scripts/insert_docs_license_footer.py`（为 docs 顶层 `^\d+_.*\.md$` 文档追加许可页脚）；
     5) `scripts/update_readme_index.py`（重建 README 文末索引）；
     6) `scripts/md_normalize.py`（对 README 与 docs 做 Markdown 规范化）。
@@ -163,6 +163,26 @@
 - 脚本约束：所有递归遍历/修改 Markdown 的脚本必须跳过该目录并视为只读。统一通过 `scripts/docs_processing_config.json` 的 `skip_paths` 管理（默认已包含 `docs/kernel_reference/`）。对齐流程中涉及的 `scripts/md_normalize.py`、`scripts/convert_texttt_to_backticks.py`、`scripts/insert_o3_citation_note.py` 等脚本遵循该白名单；而仅处理 `docs/*.md` 顶层文件的 `scripts/rename_docs_to_git_ts.py`、`scripts/insert_doc_date_from_prefix.py`、`scripts/update_readme_index.py` 本身不会进入该目录。
 - AI 助手引用范围：在与 Codex 或其他 AI 助手协作时，如未明确限定“知识库”范围，应默认将 `docs/` 及其所有递归子目录的文档一并纳入参考范围（包含只读目录 `docs/kernel_reference/`）；仅编辑、索引与自动修改保持对 `docs/kernel_reference/` 的只读约束不变。
 
+## 钩子与执行策略（更新）
+
+- 禁止在 Git 钩子（含 `.githooks/pre-commit`）中对“文档或代码”做任何自动提醒、修改或拦截操作；钩子应保持空操作并直接通过。
+- 全部规范以“开发协议”约束为准；当需要整理与校验时，使用手动指令执行对齐流程：`python scripts/align_docs.py`。
+- CI 可根据项目需要开启或关闭；若开启，仅作只读校验，不改动仓库内容。
+
+## 文档对齐范围与时间戳策略（扩展）
+
+- 顶层目录（不递归）统一纳入对齐：
+  - `docs/`
+  - `my_docs/project_docs/`（不包含子目录，且不得处理 `my_docs/project_docs/kernel_reference/`）
+  - `my_project/gmx_split_20250924_011827/docs/`
+- 文件命名采用“秒时间戳_标题.md”格式；“秒时间戳”由“文件创建时间（秒）”给定（Windows 为 `st_ctime`；不可得时回退 `mtime`）。
+- 一旦创建不再变更；当出现同秒冲突时，在该秒内按标题名（去前缀与扩展名）降序排列，并依次向前一秒分配：`ts`, `ts-1`, `ts-2`, …，以保证同目录内唯一。
+- 日期行写入规则：仍由文件名中的时间戳转换为“日期：YYYY-MM-DD”（插在文档首个标题下一行）。
+- 执行脚本：
+  - 重写时间戳：`python scripts/rename_docs_to_git_ts.py`
+  - 写入日期行：`python scripts/insert_doc_date_from_prefix.py`
+  - 许可页脚（仅顶层、匹配 `^\d+_.*\.md$`）：`python scripts/insert_docs_license_footer.py`（不得作用于 `my_docs/project_docs/kernel_reference/`）
+
 ## docs 许可页脚规范（顶层秒时间戳文档）
 
 - 适用范围：仅限 `docs/` 目录顶层、文件名匹配 `^\d+_.*\.md$` 的 Markdown 文档（即“秒时间戳_*.md”）；不包括任何子目录（如 `docs/kernel_reference/`）。
@@ -181,6 +201,20 @@
 - 执行工具：`python scripts/insert_docs_license_footer.py`；已集成于 `scripts/align_docs.py` 与 `.githooks/pre-commit`，提交前与对齐流程会自动补齐。
 - 编码与行尾：写回统一为 UTF-8（带 BOM）+ LF；不影响文首“摘要”或“日期”规范。
 - 与代码许可的关系：该页脚仅适用于知识库文档，独立于源代码的 GPL 许可头部要求。
+
+## docs 文章样式规范（时间戳_标题.md）
+
+- 文件命名：`<秒时间戳>_<标题>.md`。其中“秒时间戳”由文档内“日期：YYYY-MM-DD”换算为本地 00:00:00 的 Unix 秒数；同一日期产生的同秒冲突，按标题名（去前缀与扩展名）降序依次分配 `ts, ts-1, ts-2, ...`。
+- 文首结构：
+  - 第一行：`# <标题>`
+  - 空一行
+  - 元信息两行：`- 作者：GaoZheng`、`- 日期：YYYY-MM-DD`
+  - 空一行
+  - （可选）O3 注释块
+  - 空一行
+  - `### 摘要：` 与摘要正文
+  - 后续正文与分隔线 `---` 等不受此条影响
+- 规范化脚本：`python scripts/ensure_docs_style_from_date.py`（顶层、非递归；作用于 `docs/`、`my_docs/project_docs/`、`my_project/gmx_split_20250924_011827/docs/`；天然跳过 `my_docs/project_docs/kernel_reference/`）。
 ## 源代码许可与头部约定（强制）
 
 - 适用范围：本仓库内所有源代码文件（如 `.py`、`.c/.cpp/.h`、`.js/.ts/.jsx/.tsx`、`.java/.kt`、`.go`、`.rs`、`.cs`、`.sh/.ps1`、`.lua`、以及其他常见语言源文件）。以下不在本规范强制范围：`docs/*.md` 文档（含其子目录，尤其 `docs/kernel_reference/` 只读目录）、纯文本说明（`.md/.mdx/.markdown/.txt/.rst/.adoc`）、构建产物与缓存目录、第三方依赖或镜像文件。

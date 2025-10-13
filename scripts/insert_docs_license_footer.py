@@ -121,12 +121,11 @@ def _creation_year_from_name(p: Path) -> int | None:
         return None
 
 
-def process_docs(root: Path, dry_run: bool = False) -> int:
-    docs = root / "docs"
-    if not docs.is_dir():
+def process_dir(d: Path, dry_run: bool = False) -> int:
+    if not d.is_dir():
         return 0
     updated = 0
-    for p in sorted(docs.iterdir()):
+    for p in sorted(d.iterdir()):
         if not p.is_file():
             continue
         if not RE_TS_MD.match(p.name):
@@ -170,7 +169,14 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     # --check implies dry-run
     dry = args.dry_run or args.check
-    n = process_docs(root, dry_run=dry)
+    targets = [
+        root / 'docs',
+        root / 'my_docs' / 'project_docs',
+        root / 'my_project' / 'gmx_split_20250924_011827' / 'docs',
+    ]
+    n = 0
+    for d in targets:
+        n += process_dir(d, dry_run=dry)
     if dry:
         print(f"[insert_docs_license_footer] DryRun: would update {n} files")
         if args.check:

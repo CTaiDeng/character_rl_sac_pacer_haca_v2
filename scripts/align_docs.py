@@ -69,10 +69,12 @@ def run(cmd: List[str]) -> int:
 def main() -> int:
     rc = 0
     py = _resolve_venv_python()
-    rc |= run([py, str(ROOT / 'scripts' / 'rename_docs_to_git_ts.py')])
-    rc |= run([py, str(ROOT / 'scripts' / 'insert_doc_date_from_prefix.py')])
+    # 基于文档内日期与标题规范化样式并重命名（仅顶层目录）
+    rc |= run([py, str(ROOT / 'scripts' / 'ensure_docs_style_from_date.py')])
     # 在日期行下方按需插入 O3 理论注释
     rc |= run([py, str(ROOT / 'scripts' / 'insert_o3_citation_note.py')])
+    # docs 顶层强制 UTF-8 BOM + LF
+    rc |= run([py, str(ROOT / 'scripts' / 'force_docs_utf8_bom.py')])
     rc |= run([py, str(ROOT / 'scripts' / 'insert_docs_license_footer.py')])
     rc |= run([py, str(ROOT / 'scripts' / 'update_readme_index.py')])
     # 清理索引中可能遗留的 $\texttt{...}$ 样式，统一为反引号

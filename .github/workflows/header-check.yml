@@ -25,3 +25,7 @@ jobs:
         shell: bash
         run: |
           python scripts/insert_docs_license_footer.py --dry-run --check
+      - name: Check docs top-level encoding is UTF-8 BOM + LF
+        shell: bash
+        run: |
+          python scripts/force_docs_utf8_bom.py --check

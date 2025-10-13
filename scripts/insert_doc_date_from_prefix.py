@@ -1,43 +1,34 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2025 GaoZheng
-# 
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, version 3.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see https://www.gnu.org/licenses/.
-
 
 """
-为 docs 目录中带有“时间戳前缀_<名称>.md”的文档，在标题下方插入/更新日期行：
+为指定目录顶层、文件名匹配 "^<ts>_*.md" 的文档，在文档首个标题下一行写入/更新日期行：
   日期：YYYY-MM-DD
 
-规则：
-- 仅处理文件名匹配 ^\d+_.*\.md$ 的 Markdown；
-- 日期来源于文件名前缀（Unix epoch 秒），转换为本地时区日期 YYYY-MM-DD；
-- 插入位置为文档的首个标题行（以 # 开头）之后；
-- 若紧随标题已有“日期：”行，则就地更新为新日期；
-- 读写编码：UTF-8（BOM）。
+规则
+- 仅处理顶层，不递归。
+- 目录列表：docs/；my_docs/project_docs/；my_project/gmx_split_20250924_011827/docs/。
+- 日期来源：文件名中的秒级时间戳（不从 git 取），对应 UTC→本地时间的 YYYY-MM-DD（使用本地时区）。
+- 插入位置：文档首个以 # 开头的标题下方一行；若已有“日期：”行则就地更新。
+- 编码：读写均为 UTF-8（BOM），行尾规范化为 LF。
 """
 
-import os
+from __future__ import annotations
+
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, List
+from typing import List, Tuple
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS_DIR = ROOT / 'docs'
+TARGET_DIRS = [
+    ROOT / 'docs',
+    ROOT / 'my_docs' / 'project_docs',
+    ROOT / 'my_project' / 'gmx_split_20250924_011827' / 'docs',
+]
 
 PREFIX_RE = re.compile(r'^(\d+)_.*\.md$', re.IGNORECASE)
 TITLE_RE = re.compile(r'^\s*#{1,6}\s+')
@@ -52,9 +43,9 @@ def read_text(path: Path) -> Tuple[str, str]:
 
 
 def write_text(path: Path, text: str, nl: str) -> None:
-    text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', nl)
-    # Path.write_text 不支持 newline 参数，改用显式打开
-    with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+    # 统一为 LF 写回（仓库规范），并带 BOM
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    with open(path, 'w', encoding='utf-8-sig', newline='\n') as f:
         f.write(text)
 
 
@@ -65,24 +56,24 @@ def ensure_date_after_title(text: str, date_str: str) -> str:
     # 找到首个标题行
     title_idx = None
     for i, ln in enumerate(lines):
-        if TITLE_RE.match(ln.strip()):
+        if TITLE_RE.match(ln):
             title_idx = i
             break
     if title_idx is None:
-        # 无标题，插入在文件头部
+        # 无标题，则在文件头插入日期
         return '\n'.join([f'日期：{date_str}', ''] + lines)
 
     insert_idx = title_idx + 1
-    # 跳过标题后的空行
+    # 跳过紧随其后的空行
     while insert_idx < len(lines) and lines[insert_idx].strip() == '':
         insert_idx += 1
 
-    # 如果已有日期行则更新
+    # 若已有日期行则就地更新
     if insert_idx < len(lines) and DATE_RE.match(lines[insert_idx]):
         lines[insert_idx] = f'日期：{date_str}'
         return '\n'.join(lines)
 
-    # 否则在标题后插入“日期：”与空行
+    # 否则在标题下方插入
     new_lines: List[str] = []
     new_lines.extend(lines[:title_idx+1])
     new_lines.append(f'日期：{date_str}')
@@ -91,12 +82,11 @@ def ensure_date_after_title(text: str, date_str: str) -> str:
     return '\n'.join(new_lines)
 
 
-def main() -> int:
-    if not DOCS_DIR.is_dir():
-        print(f'[insert_doc_date_from_prefix] 未找到目录：{DOCS_DIR}')
-        return 1
+def process_dir(d: Path) -> int:
+    if not (d.exists() and d.is_dir()):
+        return 0
     changed = 0
-    for p in sorted(DOCS_DIR.iterdir()):
+    for p in sorted(d.iterdir()):
         if not (p.is_file() and p.suffix.lower() == '.md'):
             continue
         m = PREFIX_RE.match(p.name)
@@ -113,9 +103,17 @@ def main() -> int:
         if new_text != text:
             write_text(p, new_text, nl)
             changed += 1
-    print(f'[insert_doc_date_from_prefix] 已更新 {changed} 个文件')
+    return changed
+
+
+def main() -> int:
+    total = 0
+    for d in TARGET_DIRS:
+        total += process_dir(d)
+    print(f'[insert_doc_date_from_prefix] updated={total}')
     return 0
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    raise SystemExit(main())
+
