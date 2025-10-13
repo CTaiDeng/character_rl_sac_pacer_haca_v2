@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 import subprocess
 from datetime import datetime, timezone
+from _doc_edit_guard import require_explicit_doc_paths
 
 
 RE_TS_MD = re.compile(r"^\d+_.*\.md$", re.IGNORECASE)
@@ -28,7 +29,7 @@ def build_footer_block(year_text: str) -> str:
     return (
         "---\n\n"
         "**许可声明 (License)**\n\n"
-        f"Copyright (C) {year_text} GaoZheng\n\n"
+        f"Copyright (C) {year_text}- GaoZheng\n\n"
         "本文档采用[知识共享-署名-非商业性使用-禁止演绎 4.0 国际许可协议 (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/deed.zh-Hans)进行许可。\n"
     )
 
@@ -162,21 +163,48 @@ def process_dir(d: Path, dry_run: bool = False) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Insert/check license footer into docs/*.md with ts prefix (top-level only)")
+    ap = argparse.ArgumentParser(description="Insert/check license footer（仅处理显式给出的文件路径）")
     ap.add_argument("--dry-run", action="store_true", help="Do not write changes; report only")
     ap.add_argument("--check", action="store_true", help="Exit with non-zero status if any file would be updated")
+    ap.add_argument("files", nargs="+", help="项目相对路径，如 docs/1234567890_标题.md")
     args = ap.parse_args()
-    root = Path(__file__).resolve().parents[1]
     # --check implies dry-run
     dry = args.dry_run or args.check
-    targets = [
-        root / 'docs',
-        root / 'my_docs' / 'project_docs',
-        root / 'my_project' / 'gmx_split_20250924_011827' / 'docs',
-    ]
-    n = 0
-    for d in targets:
-        n += process_dir(d, dry_run=dry)
+    files = require_explicit_doc_paths(args.files)
+    # Convert to Path list
+    files = [Path(f) if isinstance(f, str) else f for f in files]
+    # Process
+    # define local processor referencing file-based flow
+    def _process(files_list):
+        updated = 0
+        root = Path(__file__).resolve().parents[1]
+        for p in files_list:
+            try:
+                text = p.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            norm = normalize_lf(text)
+            create_year = _creation_year_from_name(p)
+            if create_year is None:
+                cy = _git_first_add_year(root, p)
+                create_year = cy if cy is not None else datetime.fromtimestamp(p.stat().st_ctime, tz=timezone.utc).year
+            last_year = _git_last_mod_year(root, p)
+            if last_year is None:
+                last_year = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).year
+            year_text = f"{create_year}-{last_year}" if last_year > create_year else f"{create_year}"
+            footer_block = build_footer_block(year_text)
+            if has_footer(norm):
+                new_text = standardize_existing_footer(norm, footer_block)
+            else:
+                base = norm.rstrip("\n")
+                new_text = base + "\n\n" + footer_block
+            if dry:
+                print(f"[insert_docs_license_footer] DRY add footer: {p}")
+            else:
+                write_utf8_bom(p, new_text)
+            updated += 1
+        return updated
+    n = _process(files)
     if dry:
         print(f"[insert_docs_license_footer] DryRun: would update {n} files")
         if args.check:

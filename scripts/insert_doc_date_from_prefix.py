@@ -21,6 +21,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
+import argparse
+from _doc_edit_guard import require_explicit_doc_paths
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,12 +84,10 @@ def ensure_date_after_title(text: str, date_str: str) -> str:
     return '\n'.join(new_lines)
 
 
-def process_dir(d: Path) -> int:
-    if not (d.exists() and d.is_dir()):
-        return 0
+def process_files(files: List[Path]) -> int:
     changed = 0
-    for p in sorted(d.iterdir()):
-        if not (p.is_file() and p.suffix.lower() == '.md'):
+    for p in files:
+        if p.suffix.lower() != '.md':
             continue
         m = PREFIX_RE.match(p.name)
         if not m:
@@ -107,13 +107,14 @@ def process_dir(d: Path) -> int:
 
 
 def main() -> int:
-    total = 0
-    for d in TARGET_DIRS:
-        total += process_dir(d)
+    ap = argparse.ArgumentParser(description='Insert/Update date after title（仅处理显式给出的文件路径）')
+    ap.add_argument('files', nargs='+', help='项目相对路径，如 docs/1234567890_标题.md')
+    args = ap.parse_args()
+    files = require_explicit_doc_paths(args.files)
+    total = process_files(files)
     print(f'[insert_doc_date_from_prefix] updated={total}')
     return 0
 
 
 if __name__ == '__main__':
     raise SystemExit(main())
-

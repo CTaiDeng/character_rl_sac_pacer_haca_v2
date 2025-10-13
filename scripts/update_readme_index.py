@@ -115,6 +115,46 @@ def ensure_summary_in_doc(path: str) -> Tuple[str, bool]:
     return 'TODO：请补充本篇文档摘要（120–300字）。', True
 
 
+def extract_summary(path: str) -> str:
+    text, _nl = read_text(path)
+    # 注释包裹优先
+    m = re.search(r"<!--\s*SUMMARY-START\s*-->(.*?)<!--\s*SUMMARY-END\s*-->", text, flags=re.DOTALL)
+    if m:
+        summary = m.group(1).strip()
+        return " ".join(line.strip() for line in summary.splitlines() if line.strip())
+    # 标题 “### 摘要：” 后的首段
+    lines = text.splitlines()
+    for i, ln in enumerate(lines):
+        if re.match(r"^\s*#{3,}\s*摘要\s*[:：]?\s*$", ln):
+            j = i + 1
+            while j < len(lines) and lines[j].strip() == "":
+                j += 1
+            buf = []
+            while j < len(lines):
+                if lines[j].strip() == "": break
+                if re.match(r"^\s*#{2,}\s+", lines[j]): break
+                if lines[j].strip() == "---": break
+                buf.append(lines[j].strip())
+                j += 1
+            return " ".join(buf).strip()
+    # 引文块 “> 摘要：” 连续行
+    start=None; end=None
+    for i, ln in enumerate(lines[:120]):
+        if ln.lstrip().startswith(">") and ("摘要" in ln):
+            start=i; j=i
+            while j < len(lines) and lines[j].lstrip().startswith(">"): j+=1
+            end=j; break
+    if start is not None and end is not None:
+        cleaned=[]
+        for b in lines[start:end]:
+            s=b.lstrip()
+            if s.startswith(">"): s=s[1:]
+            s=s.strip()
+            s=re.sub(r"^摘要\s*[:：]\s*","",s)
+            if s: cleaned.append(s)
+        return " ".join(cleaned).strip()
+    return ""
+
 def collect_docs(root: str) -> List[str]:
     p = os.path.join(root, 'docs')
     if not os.path.isdir(p):
@@ -181,18 +221,18 @@ def main():
     items: List[Tuple[str, str]] = []
     updated_docs = 0
     for path in docs:
-        summary, updated = ensure_summary_in_doc(path)
+        summary = extract_summary(path)
         rel = os.path.relpath(path, root).replace('\\', '/')
         # 适度截断到 ~300 字符
         summary = summary.strip()
         if len(summary) > 320:
             summary = summary[:317].rstrip() + '…'
         items.append((rel, summary))
-        if updated:
-            updated_docs += 1
+        # 不再修改原文档，故不统计 updated
     upsert_readme_index(root, items)
-    print(f"[update_readme_index] collected={len(items)} updated_missing_summaries={updated_docs}")
+    print(f"[update_readme_index] collected={len(items)}")
 
 
 if __name__ == '__main__':
     main()
+

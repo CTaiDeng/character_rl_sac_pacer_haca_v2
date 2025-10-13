@@ -47,9 +47,8 @@ TS_PREFIX_RE = re.compile(r"^(\d+)_([\s\S]+)\.md$", re.IGNORECASE)
 def collect_targets(args: List[str]) -> List[Path]:
     paths: List[Path] = []
     if not args:
-        if DOCS.is_dir():
-            paths = [p for p in DOCS.rglob("*.md") if p.is_file()]
-        return sorted(paths)
+        # 最高原则：未显式提供项目相对路径时，拒绝批量修改
+        return []
 
     for a in args:
         p = (ROOT / a).resolve() if not os.path.isabs(a) else Path(a)
@@ -124,6 +123,9 @@ def ensure_title_equals_filename(path: Path) -> bool:
 
 def main(argv: List[str]) -> int:
     targets = collect_targets(argv)
+    if not targets:
+        print('[ensure_title] 拒绝修改：请显式给出项目相对路径（如 docs/123456_标题.md）')
+        return 2
     updated = 0
     for p in targets:
         try:

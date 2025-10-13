@@ -13,6 +13,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import argparse
+from _doc_edit_guard import require_explicit_doc_paths
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,26 +46,23 @@ def recode_to_utf8_bom(p: Path, dry_run: bool = False) -> bool:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description="Force docs top-level .md to UTF-8 BOM + LF")
+    ap = argparse.ArgumentParser(description="Force .md to UTF-8 BOM + LF（仅处理显式给出的文件路径）")
     ap.add_argument("--check", action="store_true", help="Only check; non-zero exit if any file would be rewritten")
+    ap.add_argument("files", nargs='+', help='项目相对路径，如 docs/1234567890_标题.md')
     args = ap.parse_args(argv)
-    if not DOCS.is_dir():
-        print("[force_docs_utf8_bom] docs/ not found")
-        return 0
+    files = require_explicit_doc_paths(args.files)
     updated = 0
-    for p in sorted(DOCS.iterdir()):
-        if not p.is_file() or p.suffix.lower() != ".md":
-            continue
+    for p in files:
         try:
             would = recode_to_utf8_bom(p, dry_run=True)
             if args.check:
                 if would:
                     updated += 1
-                    print(f"[force_docs_utf8_bom] would rewrite: {p.relative_to(ROOT)}")
+                    print(f"[force_docs_utf8_bom] would rewrite: {p}")
                 continue
             if recode_to_utf8_bom(p, dry_run=False):
                 updated += 1
-                print(f"[force_docs_utf8_bom] rewrote: {p.relative_to(ROOT)}")
+                print(f"[force_docs_utf8_bom] rewrote: {p}")
         except Exception as e:
             print(f"[force_docs_utf8_bom] skip {p}: {e}")
     print(f"[force_docs_utf8_bom] updated={updated}")

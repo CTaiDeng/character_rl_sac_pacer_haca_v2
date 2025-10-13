@@ -41,14 +41,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import argparse
+from _doc_edit_guard import require_explicit_doc_paths
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGET_DIRS = [
-    ROOT / 'docs',
-    ROOT / 'my_docs' / 'project_docs',
-    ROOT / 'my_project' / 'gmx_split_20250924_011827' / 'docs',
-]
 
 NAME_RE = re.compile(r'^(\d+)_([\s\S]+)\.md$', re.IGNORECASE)
 TITLE_RE = re.compile(r'^\s*#\s+(.+?)\s*$')
@@ -253,39 +250,30 @@ def perform_renames(mapping: Dict[Path, Path]) -> int:
     return changed
 
 
-def process_dir(d: Path) -> Tuple[int, int]:
-    if not (d.exists() and d.is_dir()):
-        return 0, 0
-    # Collect docs and ensure meta
+def process_files(files: List[Path]) -> Tuple[int, int]:
     infos: List[DocInfo] = []
     content_updates = 0
-    for p in sorted(d.iterdir()):
-        if not (p.is_file() and p.suffix.lower() == '.md'):
-            continue
-        # kernel_reference is a subdir; we don't recurse, so naturally skipped
+    for p in files:
         info, changed = ensure_meta_and_collect(p)
         if info is None:
             continue
         infos.append(info)
         if changed:
             content_updates += 1
-    # Plan and perform renames
     mapping = plan_renames(infos)
     renamed = perform_renames(mapping)
     return content_updates, renamed
 
 
 def main() -> int:
-    total_updates = 0
-    total_renames = 0
-    for d in TARGET_DIRS:
-        u, r = process_dir(d)
-        total_updates += u
-        total_renames += r
-    print(f'[ensure_docs_style_from_date] updated={total_updates} renamed={total_renames}')
+    ap = argparse.ArgumentParser(description='Ensure docs style from in-document date（仅处理显式给出的文件路径）')
+    ap.add_argument('files', nargs='+', help='项目相对路径，如 docs/1234567890_标题.md')
+    args = ap.parse_args()
+    files = require_explicit_doc_paths(args.files)
+    u, r = process_files(files)
+    print(f'[ensure_docs_style_from_date] updated={u} renamed={r}')
     return 0
 
 
 if __name__ == '__main__':
     raise SystemExit(main())
-

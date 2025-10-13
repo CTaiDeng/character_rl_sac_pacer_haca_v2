@@ -1,55 +1,33 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2025 GaoZheng
-# 
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, version 3.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see https://www.gnu.org/licenses/.
-
 
 """
-文档对齐指令：标准化 docs 知识库
-
-步骤：
-1) 将 docs/<ts>_*.md 的时间戳前缀重写为该文件的 git 入库时间戳（秒）
-2) 将该时间戳（转为 YYYY-MM-DD）写入文档主标题下一行（若存在则更新）
-3) 重建 README 文末的文档摘要索引
-4) 规范化 Markdown（行内/行间数学分隔、保留代码围栏），编码 UTF-8（BOM）
+文档对齐指令（严格模式）：
+- 最高原则：未显式给出项目相对路径时，不对 docs 下文章做任何修改；只更新 README 文末的“文档摘要索引”。
+- 当显式给出项目相对路径列表时，仅对这些文件执行规范化与页脚/编码处理，随后更新 README 索引。
 
 用法：
-  python scripts/align_docs.py
+  python scripts/align_docs.py [docs/1234_标题.md docs/5678_标题.md ...]
 """
+
+from __future__ import annotations
 
 import os
 import sys
 import subprocess
 import platform
-from typing import List
 from pathlib import Path
+from typing import List
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def _resolve_venv_python() -> str:
-    """Prefer repo local venv interpreter.
-
-    - On Windows: .venv\Scripts\python.exe
-    - On POSIX:   .venv/bin/python
-    - Fallback:   current sys.executable
-    """
     win_path = ROOT / ".venv" / "Scripts" / "python.exe"
     posix_path = ROOT / ".venv" / "bin" / "python"
-    # Prefer Windows path when running on Windows（满足用户要求）
     if platform.system().lower().startswith("win") and win_path.exists():
         return str(win_path)
     if posix_path.exists() and os.access(posix_path, os.X_OK):
@@ -69,27 +47,27 @@ def run(cmd: List[str]) -> int:
 def main() -> int:
     rc = 0
     py = _resolve_venv_python()
-    # 基于文档内日期与标题规范化样式并重命名（仅顶层目录）
-    rc |= run([py, str(ROOT / 'scripts' / 'ensure_docs_style_from_date.py')])
-    # 在日期行下方按需插入 O3 理论注释
-    rc |= run([py, str(ROOT / 'scripts' / 'insert_o3_citation_note.py')])
-    # docs 顶层强制 UTF-8 BOM + LF
-    rc |= run([py, str(ROOT / 'scripts' / 'force_docs_utf8_bom.py')])
-    rc |= run([py, str(ROOT / 'scripts' / 'insert_docs_license_footer.py')])
+
+    files = sys.argv[1:]
+    if files:
+        # 仅处理显式目标文件
+        rc |= run([py, str(ROOT / 'scripts' / 'ensure_docs_style_from_date.py'), *files])
+        rc |= run([py, str(ROOT / 'scripts' / 'insert_o3_citation_note.py'), *files])
+        rc |= run([py, str(ROOT / 'scripts' / 'force_docs_utf8_bom.py'), *files])
+        rc |= run([py, str(ROOT / 'scripts' / 'insert_docs_license_footer.py'), *files])
+
+    # README 索引（只读复制，不改动原文档）
     rc |= run([py, str(ROOT / 'scripts' / 'update_readme_index.py')])
-    # 清理索引中可能遗留的 $\texttt{...}$ 样式，统一为反引号
-    rc |= run([py, str(ROOT / 'scripts' / 'fix_readme_index_style.py')])
-    # 全仓清理 $\texttt{...}$ → `...`
-    rc |= run([py, str(ROOT / 'scripts' / 'convert_texttt_to_backticks.py')])
-    # 规范化 README 与 docs
+    # 仅规范化 README
     rc |= run([py, str(ROOT / 'scripts' / 'md_normalize.py'), 'README.md'])
-    rc |= run([py, str(ROOT / 'scripts' / 'md_normalize.py'), 'docs'])
+
     if rc == 0:
-        print('[align_docs] 文档对齐完成')
+        print('[align_docs] 文档对齐完成（严格模式）')
     else:
-        print('[align_docs] 文档对齐存在错误，请查看上方输出')
+        print('[align_docs] 文档对齐存在问题，请查看上方日志')
     return rc
 
 
 if __name__ == '__main__':
     sys.exit(main())
+
