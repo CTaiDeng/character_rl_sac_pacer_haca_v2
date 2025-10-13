@@ -159,7 +159,7 @@ def collect_docs(root: str) -> List[str]:
     p = os.path.join(root, 'docs')
     if not os.path.isdir(p):
         return []
-    files = [os.path.join(p, fn) for fn in os.listdir(p) if fn.lower().endswith('.md')]
+    files = [os.path.join(p, fn) for fn in os.listdir(p) if fn.lower().endswith('.md') and fn != 'LICENSE.md']
     files.sort()
     return files
 
