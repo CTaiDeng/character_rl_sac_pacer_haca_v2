@@ -1,4 +1,4 @@
-﻿# 语义动力学框架（HACA｜A Framework for Semantic Dynamics）
+﻿﻿﻿﻿﻿# 语义动力学框架（HACA｜A Framework for Semantic Dynamics）
 日期：2025-09-28
 
 
@@ -6,7 +6,9 @@
 
 ---
 
-## 第一部分：语义动力学的公理化基础（Axiomatic Foundations）
+# 语义动力学框架（HACA｜A Framework for Semantic Dynamics）
+日期：2025-09-28
+
 
 本框架建立在以下三条基本公理之上，它们共同定义了语义现象的“宇宙法则”。
 
@@ -89,3 +91,11 @@
 ## 总结
 
 语义动力学框架将分层代数认知架构（HACA）的关键思想提炼为公理化体系：通往 AGI 的路径，不仅在于更大的数据与算力，更在于发现并利用支配“意义”的深层几何与代数秩序。该框架为理解现有 AI 提供地图，也为创造未来 AI 指明罗盘。
+
+---
+
+**许可声明 (License)**
+
+Copyright (C) 2025 GaoZheng
+
+本文档采用[知识共享-署名-非商业性使用-禁止演绎 4.0 国际许可协议 (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/deed.zh-Hans)进行许可。

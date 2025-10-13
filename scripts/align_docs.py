@@ -1,5 +1,20 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2025 GaoZheng
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, version 3.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see https://www.gnu.org/licenses/.
+
 
 """
 文档对齐指令：标准化 docs 知识库
@@ -58,6 +73,7 @@ def main() -> int:
     rc |= run([py, str(ROOT / 'scripts' / 'insert_doc_date_from_prefix.py')])
     # 在日期行下方按需插入 O3 理论注释
     rc |= run([py, str(ROOT / 'scripts' / 'insert_o3_citation_note.py')])
+    rc |= run([py, str(ROOT / 'scripts' / 'insert_docs_license_footer.py')])
     rc |= run([py, str(ROOT / 'scripts' / 'update_readme_index.py')])
     # 清理索引中可能遗留的 $\texttt{...}$ 样式，统一为反引号
     rc |= run([py, str(ROOT / 'scripts' / 'fix_readme_index_style.py')])

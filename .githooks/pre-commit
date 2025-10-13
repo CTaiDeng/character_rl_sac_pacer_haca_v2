@@ -33,6 +33,8 @@ echo "[pre-commit] Ensure doc date line from prefix"
 "$PY" scripts/insert_doc_date_from_prefix.py || true
 echo "[pre-commit] Insert O3 citation notes if needed"
 "$PY" scripts/insert_o3_citation_note.py || true
+echo "[pre-commit] Insert docs license footer (ts_*.md in docs root)"
+"$PY" scripts/insert_docs_license_footer.py || true
 
 # Stage docs changes (renames/content) before diffing staged set
 git add docs || true
@@ -40,7 +42,8 @@ git add docs || true
 # Collect changed markdown after enforcement
 changed_md=( $(git diff --cached --name-only --diff-filter=ACMRTUXB \
   | grep -E '\.md$' \
-  | grep -v -E '^engineering_docs_archive/' || true) )
+  | grep -v -E '^engineering_docs_archive/' \
+  | grep -v -E '^docs/kernel_reference/' || true) )
 
 if [ ${#changed_md[@]} -gt 0 ]; then
   echo "[pre-commit] Normalize Markdown: ${changed_md[*]}"
@@ -64,5 +67,10 @@ git add README.md || true
 if [ ${#changed_md[@]} -gt 0 ]; then
   git add "${changed_md[@]}" || true
 fi
+
+echo "[pre-commit] Check GPL header for staged sources"
+# Feed staged file list (NUL-separated) to checker; it will self-filter non-source files
+git diff --cached --name-only --diff-filter=ACMRTUXB -z \
+  | "$PY" scripts/check_gpl_header.py --stdin -0
 
 exit 0

@@ -1,4 +1,4 @@
-﻿# 字符粒度策略环境 V2：无泄漏 POMDP + 离散最大熵 SAC（期望备份·Top‑p）
+﻿﻿﻿﻿﻿# 字符粒度策略环境 V2：无泄漏 POMDP + 离散最大熵 SAC（期望备份·Top‑p）
 日期：2025-09-22
 
 > 摘要：本文面向字符级 POMDP 场景，系统化整理离散动作 SAC 的实现细节：策略/价值网络结构、温度/熵目标的自适应、Top-p 采样与合规 Mask 的协同，以及 CQL/BC/DAgger/EMA 等稳定训练技巧。结合生产日志与指标，给出从冷启动到稳态的调参与收敛路径，并讨论长序列与约束采样下的可观测性折中。
@@ -14,7 +14,9 @@
 
 ---
 
-### 0. 版本要点（与 V1 的关键差异）
+# 字符粒度策略环境 V2：无泄漏 POMDP + 离散最大熵 SAC（期望备份·Top‑p）
+日期：2025-09-22
+
 
 * **温度自适应修正**：采用 $\log\alpha \leftarrow \log\alpha + \eta_\alpha\,(H_{\text{tgt}}-H(\pi))$；当熵不足时提升 $\alpha$。
 * **终止截断**：目标值加入 $(1-\text{done})$；终止步不 bootstrap。
@@ -469,3 +471,11 @@ Step 05 | prev_summary=0001 chars "什"
 ```
 
 该日志由 `DemoTrainer` 自动生成，前两行展示观测窗口（历史/目标字符），`raw_action` 为策略输出字符，`summary` 为环境记账后的最新历史，结尾列出奖励拆分，便于人工复核。
+
+---
+
+**许可声明 (License)**
+
+Copyright (C) 2025 GaoZheng
+
+本文档采用[知识共享-署名-非商业性使用-禁止演绎 4.0 国际许可协议 (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/deed.zh-Hans)进行许可。

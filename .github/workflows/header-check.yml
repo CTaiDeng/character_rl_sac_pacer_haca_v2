@@ -1,0 +1,27 @@
+name: GPL Header Check
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate GPL headers for all tracked sources
+        shell: bash
+        run: |
+          git ls-files -z | python scripts/check_gpl_header.py --stdin -0
+      - name: Check docs top-level license footer compliance
+        shell: bash
+        run: |
+          python scripts/insert_docs_license_footer.py --dry-run --check

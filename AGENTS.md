@@ -66,8 +66,10 @@
   - 依次执行：
     1) `scripts/rename_docs_to_git_ts.py`（重写时间戳前缀）；
     2) `scripts/insert_doc_date_from_prefix.py`（写入/更新日期行）；
-    3) `scripts/update_readme_index.py`（重建 README 文末索引）；
-    4) `scripts/md_normalize.py`（对 README 与 docs 做 Markdown 规范化）。
+    3) `scripts/insert_o3_citation_note.py`（按关键词插入 O3 注释）；
+    4) `scripts/insert_docs_license_footer.py`（为 docs 顶层 `^\d+_.*\.md$` 文档追加许可页脚）；
+    5) `scripts/update_readme_index.py`（重建 README 文末索引）；
+    6) `scripts/md_normalize.py`（对 README 与 docs 做 Markdown 规范化）。
 - 触发时机：新增/重命名文档后，或批量文档迁移后，执行一次对齐指令；PR 合并前建议手动执行并提交。
 
 ## Markdown 规范（数学/代码格式实时审查）
@@ -138,7 +140,7 @@
 - 同步要求：上述任一文档发生方案/术语/接口/参数/流程变化时，需同步更新其他受影响文档与本节（开发协议与规范）的对应说明条目。
 - 版本与归档：采用语义化版本；发布版本时，将 5 篇主文档复制到 `engineering_docs/engineering_docs_archive/`（命名 `_vMAJOR.MINOR.PATCH.md`）。归档目录不做自动维护。
 - README 摘要索引：仅覆盖 `docs/*.md`；工程文档与归档不纳入该索引。
-- 提交信息约定：工程文档更新建议使用前缀 `docs:`，发布版本建议包含版本号，如 `docs: 发布工程文档 v1.0.1 并归档`。
+ - 提交信息约定：工程文档更新建议使用前缀 `docs:`，发布版本建议包含版本号，如 `docs: 发布工程文档 v1.0.1 并归档`。
 
 ---
 
@@ -160,3 +162,36 @@
 - 索引范围：`README.md` 文末“docs 摘要索引”不包含 `docs/kernel_reference/`。
 - 脚本约束：所有递归遍历/修改 Markdown 的脚本必须跳过该目录并视为只读。统一通过 `scripts/docs_processing_config.json` 的 `skip_paths` 管理（默认已包含 `docs/kernel_reference/`）。对齐流程中涉及的 `scripts/md_normalize.py`、`scripts/convert_texttt_to_backticks.py`、`scripts/insert_o3_citation_note.py` 等脚本遵循该白名单；而仅处理 `docs/*.md` 顶层文件的 `scripts/rename_docs_to_git_ts.py`、`scripts/insert_doc_date_from_prefix.py`、`scripts/update_readme_index.py` 本身不会进入该目录。
 - AI 助手引用范围：在与 Codex 或其他 AI 助手协作时，如未明确限定“知识库”范围，应默认将 `docs/` 及其所有递归子目录的文档一并纳入参考范围（包含只读目录 `docs/kernel_reference/`）；仅编辑、索引与自动修改保持对 `docs/kernel_reference/` 的只读约束不变。
+
+## docs 许可页脚规范（顶层秒时间戳文档）
+
+- 适用范围：仅限 `docs/` 目录顶层、文件名匹配 `^\d+_.*\.md$` 的 Markdown 文档（即“秒时间戳_*.md”）；不包括任何子目录（如 `docs/kernel_reference/`）。
+- 必须在文档底部追加以下块（存在则不重复插入；并规范化为分隔线 `---` 前后均有空行）：
+  ```
+
+  ---
+
+  **许可声明 (License)**
+
+  Copyright (C) 2025 GaoZheng
+
+  本文档采用[知识共享-署名-非商业性使用-禁止演绎 4.0 国际许可协议 (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/deed.zh-Hans)进行许可。
+  ```
+- 年份规则：版权行年份取文档创立年份；若文档最近修改年份晚于创立年份，则使用“创立年-最近修改年”形式（创立年优先从文件名时间戳解析，失败则回退到 git 首次入库时间，再失败回退到文件创建时间；最近修改年优先取 git 最近提交时间，失败回退到文件修改时间）。
+- 执行工具：`python scripts/insert_docs_license_footer.py`；已集成于 `scripts/align_docs.py` 与 `.githooks/pre-commit`，提交前与对齐流程会自动补齐。
+- 编码与行尾：写回统一为 UTF-8（带 BOM）+ LF；不影响文首“摘要”或“日期”规范。
+- 与代码许可的关系：该页脚仅适用于知识库文档，独立于源代码的 GPL 许可头部要求。
+## 源代码许可与头部约定（强制）
+
+- 适用范围：本仓库内所有源代码文件（如 `.py`、`.c/.cpp/.h`、`.js/.ts/.jsx/.tsx`、`.java/.kt`、`.go`、`.rs`、`.cs`、`.sh/.ps1`、`.lua`、以及其他常见语言源文件）。以下不在本规范强制范围：`docs/*.md` 文档（含其子目录，尤其 `docs/kernel_reference/` 只读目录）、纯文本说明（`.md/.mdx/.markdown/.txt/.rst/.adoc`）、构建产物与缓存目录、第三方依赖或镜像文件。
+- 必须头部内容（强制）：
+  - `SPDX-License-Identifier: GPL-3.0-only`
+  - `Copyright (C) 2025 GaoZheng`
+- 插入位置与注释风格：
+  - 保留可执行/解析前导：在 `shebang`（如 `#!/usr/bin/env python`）、Python 编码声明行、XML 声明（`<?xml …?>`）或 `<?php` 之后插入头部；其余文件放在第一行。
+  - 注释风格随语言采用哈希行（`#`）、C/Java/JS 块注释（`/* … */`）、XML/HTML 注释（`<!-- … -->`）、SQL/Lua 等双横线（`--`）等与语言相符的形式。
+- 执行与校验：
+  - 标准脚本：`scripts/add_gpl_header.ps1` 用于批量插入或校验头部；默认跳过 Markdown 与只读目录 `docs/kernel_reference/`，写回编码统一为 UTF-8（BOM）+ LF；具备防重复能力（检测 SPDX 或 GPL 关键字）。
+  - 推荐在提交前执行一次 DryRun：`pwsh ./scripts/add_gpl_header.ps1 -Root . -DryRun`；如需实际写入：`pwsh ./scripts/add_gpl_header.ps1 -Root .`。
+- 与文档许可的关系：代码采用 GPL-3.0-only 许可头部；`docs/` 目录内文档遵循 `docs/LICENSE.md` 所述的 CC BY-NC-ND 4.0 许可，二者相互独立、互不干扰。
+- 版本与变更：若年份或作者变更，需同步更新本条款与脚本参数，并在必要时批量重写头部。
