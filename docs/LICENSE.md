@@ -1,7 +1,4 @@
-﻿# LICENSE
-
-> 摘要：TODO：请补充本篇文档摘要（120–300字）。建议概述核心目标、方法、关键结果与适用范围。
-
+﻿# Licensing for this Directory
 
 All documents, theories, and knowledge base articles within this directory (excluding subdirectories) are licensed under the **Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License (CC BY-NC-ND 4.0)**.
 
