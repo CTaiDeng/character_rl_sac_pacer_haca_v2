@@ -216,6 +216,7 @@
   本文档采用[知识共享-署名-非商业性使用-禁止演绎 4.0 国际许可协议 (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/deed.zh-Hans)进行许可。
   ```
 - 年份规则：版权行年份取文档创立年份；若文档最近修改年份晚于创立年份，则使用“创立年-最近修改年”形式（创立年优先从文件名时间戳解析，失败则回退到 git 首次入库时间，再失败回退到文件创建时间；最近修改年优先取 git 最近提交时间，失败回退到文件修改时间）。
+- 版权行格式：年份或年份范围后接一个空格与作者名，例如“Copyright (C) 2025 GaoZheng”或“Copyright (C) 2024-2025 GaoZheng”；严禁在年份与作者名之间使用连字符（错误示例：2025- GaoZheng）。
 - 执行工具：`python scripts/insert_docs_license_footer.py`；已集成于 `scripts/align_docs.py` 与 `.githooks/pre-commit`，提交前与对齐流程会自动补齐。
 - 编码与行尾：写回统一为 UTF-8（带 BOM）+ LF；不影响文首“摘要”或“日期”规范。
 - 与代码许可的关系：该页脚仅适用于知识库文档，独立于源代码的 GPL 许可头部要求。

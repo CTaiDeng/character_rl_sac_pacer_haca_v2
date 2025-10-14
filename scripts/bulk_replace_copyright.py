@@ -27,7 +27,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description='Bulk replace copyright lines in explicit docs')
     ap.add_argument('files', nargs='+', help='项目相对路径，例如 docs/1234567890_标题.md')
     ap.add_argument('--old', default='Copyright (C) 2025 GaoZheng')
-    ap.add_argument('--new', default='Copyright (C) 2025- GaoZheng')
+    ap.add_argument('--new', default='Copyright (C) 2025 GaoZheng')
     args = ap.parse_args()
     files = require_explicit_doc_paths(args.files)
     changed = 0
@@ -41,4 +41,3 @@ def main() -> int:
 
 if __name__ == '__main__':
     raise SystemExit(main())
-

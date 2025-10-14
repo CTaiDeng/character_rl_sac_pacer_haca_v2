@@ -29,7 +29,7 @@ def build_footer_block(year_text: str) -> str:
     return (
         "---\n\n"
         "**许可声明 (License)**\n\n"
-        f"Copyright (C) {year_text}- GaoZheng\n\n"
+        f"Copyright (C) {year_text} GaoZheng\n\n"
         "本文档采用[知识共享-署名-非商业性使用-禁止演绎 4.0 国际许可协议 (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/deed.zh-Hans)进行许可。\n"
     )
 
