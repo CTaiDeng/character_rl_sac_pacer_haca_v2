@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# 根据 AGENTS.md：禁止在 pre-commit 钩子中对文档和代码执行自动提醒/修改/拦截。
-# 所有规范通过“开发协议”约定并使用手动指令（如 `python scripts/align_docs.py`）执行。
-
-exit 0
