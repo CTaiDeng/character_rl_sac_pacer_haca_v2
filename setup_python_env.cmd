@@ -1,3 +1,5 @@
+@echo off
+
 REM Copyright (C) 2025 GaoZheng
 REM SPDX-License-Identifier: GPL-3.0-only
 REM This file is part of this project.
