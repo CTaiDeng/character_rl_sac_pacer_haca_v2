@@ -20,7 +20,7 @@
 在 docs/*.md 中检测关键词并在“日期：YYYY-MM-DD”下一行插入统一注释。
 - 关键词任意出现："O3理论"、"O3元数学理论"、"主纤维丛版广义非交换李代数"、"PFB-GNLA"
 - 注释文本：
-  #### ***注：“O3理论/O3元数学理论/主纤维丛版广义非交换李代数(PFB-GNLA)”相关理论参见： [作者（GaoZheng）网盘分享](https://drive.google.com/drive/folders/1lrgVtvhEq8cNal0Aa0AjeCNQaRA8WERu?usp=sharing) 或 [作者（GaoZheng）主页](https://mymetamathematics.blogspot.com)***
+  #### ***注：“O3理论/O3元数学理论/主纤维丛版广义非交换李代数(PFB-GNLA)”相关理论参见： [作者（GaoZheng）网盘分享](https://drive.google.com/drive/folders/1lrgVtvhEq8cNal0Aa0AjeCNQaRA8WERu?usp=sharing) 或 [作者（GaoZheng）开源项目](https://github.com/CTaiDeng/open_meta_mathematical_theory) 或 [作者（GaoZheng）主页](https://mymetamathematics.blogspot.com)，欢迎访问！***
 - 仅在未存在该注释时插入；若未找到“日期：”行，则尝试在首个标题行后插入；仍未找到则插入文件首部。
 - 读写编码使用 UTF-8（带 BOM），LF 行尾。
 
@@ -45,9 +45,7 @@ KEYWORDS = (
     'PFB-GNLA',
 )
 NOTE = (
-    '#### ***注：“O3理论/O3元数学理论/主纤维丛版广义非交换李代数(PFB-GNLA)”相关理论参见： '
-    '[作者（GaoZheng）网盘分享](https://drive.google.com/drive/folders/1lrgVtvhEq8cNal0Aa0AjeCNQaRA8WERu?usp=sharing) '
-    '或 [作者（GaoZheng）主页](https://mymetamathematics.blogspot.com)***'
+    '#### ***注：“O3理论/O3元数学理论/主纤维丛版广义非交换李代数(PFB-GNLA)”相关理论参见： [作者（GaoZheng）网盘分享](https://drive.google.com/drive/folders/1lrgVtvhEq8cNal0Aa0AjeCNQaRA8WERu?usp=sharing) 或 [作者（GaoZheng）开源项目](https://github.com/CTaiDeng/open_meta_mathematical_theory) 或 [作者（GaoZheng）主页](https://mymetamathematics.blogspot.com)，欢迎访问！***'
 )
 
 DATE_RE = re.compile(r'^日期：\d{4}-\d{2}-\d{2}\s*$', re.M)

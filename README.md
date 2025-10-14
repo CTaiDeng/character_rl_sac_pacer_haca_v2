@@ -2,7 +2,7 @@
 
 ---
 
-#### ***数学理论来源：[作者（GaoZheng）网盘分享](https://drive.google.com/drive/folders/1lrgVtvhEq8cNal0Aa0AjeCNQaRA8WERu?usp=sharing) 及 [作者（GaoZheng）主页](https://mymetamathematics.blogspot.com)，欢迎访问***
+#### ***注：“O3理论/O3元数学理论/主纤维丛版广义非交换李代数(PFB-GNLA)”相关理论参见： [作者（GaoZheng）网盘分享](https://drive.google.com/drive/folders/1lrgVtvhEq8cNal0Aa0AjeCNQaRA8WERu?usp=sharing) 或 [作者（GaoZheng）开源项目](https://github.com/CTaiDeng/open_meta_mathematical_theory) 或 [作者（GaoZheng）主页](https://mymetamathematics.blogspot.com)，欢迎访问！***
 
 ---
 
@@ -10,9 +10,22 @@
 
 构造：在 $(\Sigma^*,\circ,\varepsilon)$ 上取由左/右乘子、投影/测试（幂等）、闭包（幂等）生成的端算子子幺半群 $\mathcal M\subset\mathrm{End}(\Sigma^*)$。则 $\mathcal M$ 携带 KAT 结构；当与 $*$-连续半环 $(S,\oplus,\otimes)$ 耦合时得带权 KAT，从而赋予概率/隶属度/IDF 等加权语义。存在表示同态 $\Phi:\mathrm U(\mathfrak g)\to\mathrm{End}(\Sigma^*)$ 使 $\mathcal M$ 为同态像。定义 MDQ 为 $\Delta_i=Q(\partial\mathcal J/\partial \alpha_i) - \lambda_{\mathrm{comm}}\sum_j\|[G_i,G_j]\|\pi_j$，则优化在 $\mathcal M$ 的非交换约束下可计算，并将字符级 RL 的奖励稀疏转化为在带权 KAT 上的可审计、可回放的代数优化流程。
 
-## 开发协议
+---
 
-本项目的开发协议已统一至 AGENTS.md，请参见该文件的“演示与环境约定”“Markdown 规范”“文档摘要同步规范”等章节。
+# ***激励创新，共筑未来***
+
+### ***您的支持将直接用于激励我们的核心研发团队，帮助我们攻克技术难关，持续推动项目创新。***
+
+### ***捐赠地址 (ETH/EVM):***
+### `0x4db7B85Ca18E71FB9C68121451C345BbD7d2DEC1`
+
+### ***说明: 为确保专款专用，我们启用此全新地址接收所有捐赠。所有资金往来公开透明，接受社区共同监督。***
+
+### ***感谢您的慷慨支持！***
+
+![Donate ETH/EVM](scripts/0x4db7b85ca18e71fb9c68121451c345bbd7d2dec1.png)
+
+---
 
 ## 示例
 
@@ -178,17 +191,6 @@ Configured schedule: steps_per_round=76 post_round_updates=76
     - 标注：`python -m data.catalog_lookup --query "精妙"`
     - 前缀：`python -m data.catalog_lookup --prefix "精妙。如" --lengths 2,3,4`
     - 后缀：`python -m data.catalog_lookup --suffix "”他喃喃" --lengths 2,3,4`
-
-# ***激励创新，共筑未来***
-
-### ***您的支持将直接用于激励我们的核心研发团队，帮助我们攻克技术难关，持续推动项目创新。***
-
-### ***捐赠地址 (ETH/EVM):***
-### `0x4db7B85Ca18E71FB9C68121451C345BbD7d2DEC1`
-
-### ***说明: 为确保专款专用，我们启用此全新地址接收所有捐赠。所有资金往来公开透明，接受社区共同监督。***
-
-### ***感谢您的慷慨支持！***
 
 ## 文档摘要索引
 <!-- DOCS-SUMMARY-INDEX:START -->
