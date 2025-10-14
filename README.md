@@ -1,6 +1,6 @@
 ﻿# 项目说明
 
-### [若为非Github的镜像点击这里为项目官方完整原版](https://github.com/CTaiDeng/character_rl_sac_pacer_haca_v2)
+### [若为非Github的镜像点击这里为项目官方在Github的完整原版](https://github.com/CTaiDeng/character_rl_sac_pacer_haca_v2)
 ### [作者：GaoZheng](https://mymetamathematics.blogspot.com)
 
 ---
