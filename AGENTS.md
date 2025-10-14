@@ -248,3 +248,10 @@
   - 推荐在提交前执行一次 DryRun：`pwsh ./scripts/add_gpl_header.ps1 -Root . -DryRun`；如需实际写入：`pwsh ./scripts/add_gpl_header.ps1 -Root .`。
 - 与文档许可的关系：代码采用 GPL-3.0-only 许可头部；`docs/` 目录内文档遵循 `docs/LICENSE.md` 所述的 CC BY-NC-ND 4.0 许可，二者相互独立、互不干扰。
 - 版本与变更：若年份或作者变更，需同步更新本条款与脚本参数，并在必要时批量重写头部。
+
+## 规则修订（2025-10-14）
+
+- 版本控制：`docs/kernel_reference/` 目录纳入版本控制，不再加入 `.gitignore` 忽略。
+- 同步方式：仅允许通过 `scripts/update_kernel_reference.ps1` 执行内容同步；禁止手动编辑与除该脚本外的任何自动改动。
+- 索引与规范化：`README.md` 文末“docs 摘要索引”仍不包含该目录；所有 Markdown 自动处理/规范化脚本继续通过 `scripts/docs_processing_config.json` 的 `skip_paths` 跳过该目录。
+- 钩子：`.githooks/pre-commit` 保持空操作，不对该目录做任何自动处理。
