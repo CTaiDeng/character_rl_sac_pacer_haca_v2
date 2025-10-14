@@ -24,8 +24,14 @@ jobs:
       - name: Check docs top-level license footer compliance
         shell: bash
         run: |
-          python scripts/insert_docs_license_footer.py --dry-run --check
+          set -euo pipefail
+          # 仅检查 docs 顶层“秒时间戳_*.md”，显式传参以符合文档修改授权原则
+          find docs -maxdepth 1 -type f -regextype posix-extended -regex 'docs/[0-9]+_.*\.md' -print0 \
+            | xargs -0 -r python scripts/insert_docs_license_footer.py --dry-run --check
       - name: Check docs top-level encoding is UTF-8 BOM + LF
         shell: bash
         run: |
-          python scripts/force_docs_utf8_bom.py --check
+          set -euo pipefail
+          # 显式传参，仅检查 docs 顶层“秒时间戳_*.md”
+          find docs -maxdepth 1 -type f -regextype posix-extended -regex 'docs/[0-9]+_.*\.md' -print0 \
+            | xargs -0 -r python scripts/force_docs_utf8_bom.py --check
