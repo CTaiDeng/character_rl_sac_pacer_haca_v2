@@ -1,0 +1,4 @@
+google-generativeai
+jieba
+ltp
+torch
