@@ -1,6 +1,13 @@
-**基于分类的索引（含摘要）**
+# **基于分类的索引（含摘要）**
 
-- 总计：376 篇；第一行仅显示文件名（代码样式，无链接/无项目符），下一行输出清洗后的摘要。
+### [若为非Github的镜像点击这里为项目官方在Github的完整原版](https://github.com/CTaiDeng/open_meta_mathematical_theory)
+### [作者：GaoZheng](https://mymetamathematics.blogspot.com)
+
+---
+
+### 总计：376 篇；第一行仅显示文件名（代码样式，无链接/无项目符），下一行输出清洗后的摘要。
+
+---
 
 ## 传统/O3/PFB-GNLA论证
 
