@@ -1,5 +1,6 @@
 {
-  "chatgpt.openOnStartup": true,
+  "window.title": "${workspaceName}${separator}${activeEditorShort}",
+  "chatgpt.openOnStartup": false,
   "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
   "python.terminal.activateEnvironment": true,
   "terminal.integrated.profiles.windows": {
