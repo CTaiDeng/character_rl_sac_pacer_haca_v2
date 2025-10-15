@@ -1,4 +1,6 @@
-﻿# 项目说明
+﻿沟通（面向编程助手）：本仓库默认使用中文（简体）进行交流与答复；如需英文，将在指令中显式注明。
+
+# 项目说明
 
 ### [若为非Github的镜像点击这里为项目官方在Github的完整原版](https://github.com/CTaiDeng/character_rl_sac_pacer_haca_v2)
 ### [作者：GaoZheng](https://mymetamathematics.blogspot.com)
