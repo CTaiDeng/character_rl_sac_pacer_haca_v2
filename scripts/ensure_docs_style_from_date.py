@@ -4,32 +4,29 @@
 # Copyright (C) 2025 GaoZheng
 
 """
-Ensure docs article style based on in-document date and title, and rename files to
-"<epoch_seconds>_<title>.md" accordingly. Duplicate timestamps resolve by title
-descending, assigning ts, ts-1, ts-2, ... within the same directory.
+根据文内标题与“日期：YYYY-MM-DD”规范化文首结构，并将文件重命名为
+"<秒时间戳>_<标题>.md"。
 
-Scope (top-level only, non-recursive):
+范围（顶层、非递归）：
 - docs/
-- my_docs/project_docs/ (exclude subdirectories; kernel_reference is naturally excluded)
+- my_docs/project_docs/（不进入子目录；kernel_reference 天然排除）
 - my_project/gmx_split_20250924_011827/docs/
 
-Style rules inferred from examples:
-- First line is H1: "# <标题>"
-- Then a blank line
-- Then meta lines:
+文首规则：
+- 第一行：H1 标题 "# <标题>"
+- 空一行
+- 三行元信息（相邻无空行）：
   - "- 作者：GaoZheng"
   - "- 日期：YYYY-MM-DD"
-- Then a blank line
-- Then optional O3 citation note block
-- Then a blank line
-- Then section heading "### 摘要：" and summary
+  - "- 版本：vX.Y.Z"（缺失则初始化为 v1.0.0，已存在则保留）
+- 元信息后空一行
+- 其后内容（可包含 O3 注释、摘要等）不受本脚本约束
 
-Timestamp rule:
-- The filename timestamp MUST be derived from the in-document date (local midnight, seconds).
-- If many files share the same date (thus same base ts), sort by title descending
-  and assign unique seconds ts, ts-1, ts-2, ...
+时间戳策略：
+- 文件名中的“秒时间戳”由“文内日期”的本地 00:00:00 换算而来；
+- 同日文章按标题名（去前后缀）降序排序，从当日第一秒起逐秒递增分配：base_ts+1, base_ts+2, ...
 
-This tool can fix content (insert missing author/date lines) and perform renames.
+本脚本只对传入的明确文件列表进行处理（由 _doc_edit_guard 守卫）。
 """
 
 from __future__ import annotations
@@ -38,10 +35,11 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import argparse
+
 from _doc_edit_guard import require_explicit_doc_paths
 
 
@@ -51,6 +49,7 @@ NAME_RE = re.compile(r'^(\d+)_([\s\S]+)\.md$', re.IGNORECASE)
 TITLE_RE = re.compile(r'^\s*#\s+(.+?)\s*$')
 AUTHOR_RE = re.compile(r'^\s*-\s*作者：\s*(.+?)\s*$')
 DATE_RE = re.compile(r'^\s*-\s*日期：\s*(\d{4}-\d{2}-\d{2})\s*$')
+VERSION_RE = re.compile(r'^\s*-\s*版本：\s*(v\d+\.\d+\.\d+)\s*$', re.IGNORECASE)
 
 
 def to_lf(s: str) -> str:
@@ -63,18 +62,25 @@ def read_text(path: Path) -> Tuple[str, str]:
     try:
         txt = b.decode('utf-8-sig')
     except Exception:
-        txt = b.decode('gbk', errors='replace')
+        try:
+            txt = b.decode('gbk')
+        except Exception:
+            txt = b.decode('utf-8', errors='replace')
+    # 清理潜在的重复 BOM（U+FEFF）
+    if txt.startswith('\ufeff'):
+        txt = txt.lstrip('\ufeff')
     return txt, nl
 
 
 def write_text(path: Path, text: str) -> None:
+    # 写回为 UTF-8（BOM）+ LF
     data = ('\ufeff' + to_lf(text)).encode('utf-8')
     path.write_bytes(data)
 
 
 def sanitize_title_for_filename(title: str) -> str:
-    # Replace characters invalid on Windows filenames: \ / : * ? " < > |
-    return re.sub(r'[\\/:*?"<>|]', '·', title).strip()
+    # Windows 非法字符替换：\\ / : * ? " < > |
+    return re.sub(r'[\\/:*?\"<>|]', '－', title).strip()
 
 
 @dataclass
@@ -93,19 +99,20 @@ def parse_title(lines: List[str]) -> Tuple[Optional[str], Optional[int]]:
     return None, None
 
 
-def find_meta_indices(lines: List[str], start_idx: int) -> Tuple[Optional[int], Optional[int]]:
+def find_meta_indices(lines: List[str], start_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
     author_idx = None
     date_idx = None
-    for i in range(start_idx + 1, min(len(lines), start_idx + 20)):
-        m1 = AUTHOR_RE.match(lines[i])
-        m2 = DATE_RE.match(lines[i])
-        if m1 and author_idx is None:
+    version_idx = None
+    for i in range(start_idx + 1, min(len(lines), start_idx + 40)):
+        if author_idx is None and AUTHOR_RE.match(lines[i]):
             author_idx = i
-        if m2 and date_idx is None:
+        if date_idx is None and DATE_RE.match(lines[i]):
             date_idx = i
-        if author_idx is not None and date_idx is not None:
+        if version_idx is None and VERSION_RE.match(lines[i]):
+            version_idx = i
+        if author_idx is not None and date_idx is not None and version_idx is not None:
             break
-    return author_idx, date_idx
+    return author_idx, date_idx, version_idx
 
 
 def ensure_meta_and_collect(path: Path, default_author: str = 'GaoZheng') -> Tuple[Optional[DocInfo], bool]:
@@ -115,7 +122,7 @@ def ensure_meta_and_collect(path: Path, default_author: str = 'GaoZheng') -> Tup
     title, h1_idx = parse_title(lines)
     changed = False
     if title is None:
-        # No title — cannot process
+        # 未找到 H1 标题，跳过
         return None, False
     # Ensure blank line after H1
     insert_pos = h1_idx + 1
@@ -123,40 +130,79 @@ def ensure_meta_and_collect(path: Path, default_author: str = 'GaoZheng') -> Tup
         lines.insert(insert_pos, '')
         changed = True
     # Recompute after potential insert
-    author_idx, date_idx = find_meta_indices(lines, h1_idx)
-    # Ensure author line
-    if author_idx is None:
-        lines.insert(h1_idx + 2, f'- 作者：{default_author}')
-        changed = True
-        # Shift indices
-        author_idx = h1_idx + 2
-        date_idx = None  # force re-find
-    # Ensure date line
-    if date_idx is None:
-        # Try to derive from filename prefix
+    author_idx, date_idx, version_idx = find_meta_indices(lines, h1_idx)
+    # Determine desired meta values
+    # Author
+    author_line = lines[author_idx].strip() if author_idx is not None else f'- 作者：{default_author}'
+    # Date
+    if date_idx is not None:
+        mdate0 = DATE_RE.match(lines[date_idx])
+        date_val = mdate0.group(1) if mdate0 else datetime.now().strftime('%Y-%m-%d')
+    else:
         m = NAME_RE.match(path.name)
         if m:
             try:
                 ts = int(m.group(1))
                 dt = datetime.fromtimestamp(ts)
-                date_str = dt.strftime('%Y-%m-%d')
+                date_val = dt.strftime('%Y-%m-%d')
             except Exception:
-                date_str = datetime.now().strftime('%Y-%m-%d')
+                date_val = datetime.now().strftime('%Y-%m-%d')
         else:
-            date_str = datetime.now().strftime('%Y-%m-%d')
-        # place after author line (which we ensured exists)
-        # Ensure a blank line between meta and rest
-        lines.insert(author_idx + 1, f'- 日期：{date_str}')
-        lines.insert(author_idx + 2, '')
-        changed = True
+            date_val = datetime.now().strftime('%Y-%m-%d')
+    date_line = f'- 日期：{date_val}'
+    # Version
+    if version_idx is not None:
+        version_line = lines[version_idx].strip()
     else:
-        # Ensure a blank line after date line
-        if date_idx + 1 >= len(lines) or lines[date_idx + 1].strip() != '':
-            lines.insert(date_idx + 1, '')
+        version_line = '- 版本：v1.0.0'
+
+    # Normalize meta block placement:
+    # Expected positions:
+    #   h1_idx
+    #   h1_idx+1: ''
+    #   h1_idx+2: author
+    #   h1_idx+3: date
+    #   h1_idx+4: version
+    #   h1_idx+5: ''
+    expected_block = [author_line, date_line, version_line]
+    # Ensure minimum length
+    while len(lines) < h1_idx + 6:
+        lines.append('')
+    # Write block
+    if lines[h1_idx + 2].strip() != expected_block[0]:
+        lines[h1_idx + 2] = expected_block[0]
+        changed = True
+    if lines[h1_idx + 3].strip() != expected_block[1]:
+        lines[h1_idx + 3] = expected_block[1]
+        changed = True
+    if lines[h1_idx + 4].strip() != expected_block[2]:
+        lines[h1_idx + 4] = expected_block[2]
+        changed = True
+    # Ensure exactly one blank line after version
+    if h1_idx + 5 >= len(lines) or lines[h1_idx + 5].strip() != '':
+        lines.insert(h1_idx + 5, '')
+        changed = True
+    # Remove any extra blank line between date and version
+    if lines[h1_idx + 4].strip() == '' and VERSION_RE.match(lines[h1_idx + 5] if h1_idx + 5 < len(lines) else ''):
+        # unlikely path, but keep guard
+        del lines[h1_idx + 4]
+        changed = True
+
+    # Clean up duplicated meta lines that might exist elsewhere near the header
+    # Scan a small window after the normalized block and drop duplicates
+    end_scan = min(len(lines), h1_idx + 20)
+    k = h1_idx + 6
+    while k < end_scan:
+        ln = lines[k]
+        if AUTHOR_RE.match(ln) or DATE_RE.match(ln) or VERSION_RE.match(ln):
+            del lines[k]
+            end_scan -= 1
             changed = True
+            continue
+        k += 1
 
     # Re-scan for date value
-    author_idx, date_idx = find_meta_indices(lines, h1_idx)
+    _, date_idx, _ = find_meta_indices(lines, h1_idx)
     mdate = DATE_RE.match(lines[date_idx]) if date_idx is not None else None
     if not mdate:
         return None, False
@@ -181,16 +227,17 @@ def allocate_unique_ts(entries: List[DocInfo]) -> Dict[Path, int]:
     # Within each group, sort by title descending
     for ts, arr in by_ts.items():
         arr.sort(key=lambda x: x.title, reverse=True)
-    # Assign unique ts per directory
+    # Assign unique ts per directory — from first second, increasing
     assigned: Dict[Path, int] = {}
     used: set[int] = set()
     for ts in sorted(by_ts.keys()):
+        cursor = ts + 1  # start from the first second of the day
         for e in by_ts[ts]:
-            cur = ts
-            while cur in used:
-                cur -= 1
-            used.add(cur)
-            assigned[e.path] = cur
+            while cursor in used:
+                cursor += 1
+            used.add(cursor)
+            assigned[e.path] = cursor
+            cursor += 1
     return assigned
 
 
@@ -266,7 +313,7 @@ def process_files(files: List[Path]) -> Tuple[int, int]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description='Ensure docs style from in-document date（仅处理显式给出的文件路径）')
+    ap = argparse.ArgumentParser(description='根据文内日期规范化文首并重命名（需显式传入文件列表）')
     ap.add_argument('files', nargs='+', help='项目相对路径，如 docs/1234567890_标题.md')
     args = ap.parse_args()
     files = require_explicit_doc_paths(args.files)

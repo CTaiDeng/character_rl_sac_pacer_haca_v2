@@ -2,31 +2,20 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2025 GaoZheng
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, version 3.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see https://www.gnu.org/licenses/.
 
 """
-Doc edit guard: 强制要求以“项目相对路径”的方式显式指明目标文件，方可改动 docs 下的文章。
+文档修改守卫：强制要求“项目相对路径”方式显式指定待处理文件，
+防止对 docs 下文章的误改或越权修改。
 
-允许的前缀（仅顶层，不递归目录本身；是否递归由调用方决定）：
+允许的前缀（顶层、非递归判断，可在子目录内匹配）：
 - docs/
 - my_docs/project_docs/
 - my_project/gmx_split_20250924_011827/docs/
 
-用法（在各脚本中）：
+在其他脚本中使用：
     from _doc_edit_guard import require_explicit_doc_paths
     files = require_explicit_doc_paths(sys.argv[1:])
-    # 返回经规范化、去重、存在性校验后的 Path 列表（相对/绝对输入均可）
+    # 返回已规范化且去重后的 Path 列表；若校验失败会直接退出。
 """
 
 from __future__ import annotations
@@ -52,10 +41,14 @@ def _is_under_allowed(p: Path) -> bool:
         rp = p
     for pref in ALLOWED_PREFIXES:
         try:
-            if pref.resolve() in rp.parents or rp.parent.resolve() == pref.resolve():
+            if (
+                pref.resolve() == rp.resolve()
+                or pref.resolve() in rp.parents
+                or rp.parent.resolve() == pref.resolve()
+            ):
                 return True
         except Exception:
-            # 若 resolve 失败，退化为字符串前缀判断
+            # 当 resolve 失败时，回退为字符串前缀判断
             if str(p).replace('\\', '/').startswith(str(pref).replace('\\', '/') + '/'):
                 return True
     return False
@@ -69,34 +62,50 @@ def require_explicit_doc_paths(args: Iterable[str]) -> List[Path]:
         p = (ROOT / a) if not os.path.isabs(a) else Path(a)
         paths.append(p)
     if not paths:
-        print('[doc-edit-guard] 拒绝修改：未显式给出项目相对路径（示例：docs/1234567890_标题.md）', file=sys.stderr)
+        print('[doc-edit-guard] 拒绝修改：未显式给出项目相对路径示例，如 docs/1234567890_标题.md', file=sys.stderr)
         sys.exit(2)
 
     normed: List[Path] = []
     for p in paths:
         if p.is_dir():
-            print(f'[doc-edit-guard] 拒绝修改：给出了目录而非具体文件：{p}', file=sys.stderr)
+            print(f'[doc-edit-guard] 拒绝修改：传入目录而非具体文件：{p}', file=sys.stderr)
             sys.exit(2)
         if not _is_under_allowed(p):
-            print(f'[doc-edit-guard] 拒绝修改：不在允许的知识库路径内：{p}', file=sys.stderr)
+            print(f'[doc-edit-guard] 拒绝修改：文件不在知识库允许路径内：{p}', file=sys.stderr)
             sys.exit(2)
+        # 禁止修改知识库顶层的 LICENSE.md（只读）
+        try:
+            rp = p.resolve()
+        except Exception:
+            rp = p
+        docs_root = ROOT / 'docs'
+        try:
+            if rp.name.lower() == 'license.md' and (rp.parent.resolve() == docs_root.resolve()):
+                print(f'[doc-edit-guard] 拒绝修改：禁止改动知识库许可文件：{p}', file=sys.stderr)
+                sys.exit(2)
+        except Exception:
+            pass
         if not p.exists():
-            print(f'[doc-edit-guard] 警告：文件不存在（忽略）：{p}', file=sys.stderr)
+            print(f'[doc-edit-guard] 警告：文件不存在，跳过：{p}', file=sys.stderr)
             continue
         if p.suffix.lower() != '.md':
-            print(f'[doc-edit-guard] 拒绝修改：仅允许 Markdown 文档（.md）：{p}', file=sys.stderr)
+            print(f'[doc-edit-guard] 拒绝修改：仅允许 Markdown（.md）：{p}', file=sys.stderr)
             sys.exit(2)
         normed.append(p)
     if not normed:
-        print('[doc-edit-guard] 无可处理的目标文件（均不存在或被忽略）', file=sys.stderr)
+        print('[doc-edit-guard] 无可处理的目标文件：均不存在或被过滤', file=sys.stderr)
         sys.exit(2)
     # 去重
-    uniq = []
-    seen = set()
+    uniq: List[Path] = []
+    seen: set[str] = set()
     for p in normed:
-        s = str(p.resolve())
+        try:
+            s = str(p.resolve())
+        except Exception:
+            s = str(p)
         if s in seen:
             continue
         seen.add(s)
         uniq.append(p)
     return uniq
+
