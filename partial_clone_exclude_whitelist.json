@@ -1,0 +1,13 @@
+{
+  "__comment": "此 JSON 为 partial_clone.ps1/partial_clone.cmd 工具专用；默认位于项目根目录。支持在 'exclude' 中填写目录或具体文件路径（相对仓库根，使用正斜杠）。可选扩展键：'exclude_files'（额外列出具体文件）。",
+  "exclude": [
+  ],
+  "exclude_files": [
+    "data\\chapter_iterative_io_examples.txt",
+    "data\\chinese_frequency_word.json",
+    "data\\chinese_name_frequency_word.json",
+    "data\\sample_article_lexical.json",
+    "data\\sample_article.txt",
+    "partial_clone_exclude_whitelist.json"
+  ]
+}
