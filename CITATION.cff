@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: >-
+  如果您使用或引用本项目，请按照本 CITATION.cff 中的信息进行引用。
+title: character_rl_sac_pacer_haca_v2
+abstract: >-
+  本项目围绕字符级强化学习（RL）在稀疏奖励情形下的训练与评估流程，
+  提供示例数据、脚本与可复现实验配置，旨在为相关研究与工程实践提供参考。
+authors:
+  - name: GaoZheng
+contact:
+  - name: 项目维护者
+    email: banyanlimit@gmail.com
+repository-code: https://github.com/CTaiDeng/character_rl_sac_pacer_haca_v2
+license: GPL-3.0-only
+keywords:
+  - 强化学习
+  - 字符级
+  - SAC
+  - HACA
+  - Pacer
