@@ -16,9 +16,9 @@
 # along with this program. If not, see https://www.gnu.org/licenses/.
 
 """
-Force re-encode docs top-level Markdown files to UTF-8 with BOM and LF line endings.
+Force re-encode docs top-level Markdown files to UTF-8 (no BOM) with CRLF line endings.
 - Scope: docs/ (top-level files only), excludes subdirectories.
-- Strategy: try UTF-8 decode first; if fails, try GBK (cp936) as fallback. Always write back UTF-8 BOM + LF.
+- Strategy: try UTF-8 decode first; if fails, try GBK (cp936) as fallback. Always write back UTF-8 (no BOM) + CRLF.
 - Check mode: with --check, do not write; exit non-zero if any file would be rewritten.
 """
 
@@ -34,8 +34,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 
 
-def to_lf(s: str) -> str:
-    return s.replace("\r\n", "\n").replace("\r", "\n")
+def to_crlf(s: str) -> str:
+    # Normalize to LF first, then expand to CRLF
+    lf = s.replace("\r\n", "\n").replace("\r", "\n")
+    return lf.replace("\n", "\r\n")
 
 
 def recode_to_utf8_bom(p: Path, dry_run: bool = False) -> bool:
@@ -48,9 +50,9 @@ def recode_to_utf8_bom(p: Path, dry_run: bool = False) -> bool:
             text = b.decode("gbk")
         except Exception:
             return False
-    # Normalize newlines and compute output
-    norm = to_lf(text)
-    out_b = ("\ufeff" + norm).encode("utf-8")
+    # Normalize newlines to CRLF and compute output (UTF-8, no BOM)
+    norm = to_crlf(text)
+    out_b = norm.encode("utf-8")
     changed = (out_b != b)
     if dry_run:
         return changed
@@ -60,7 +62,7 @@ def recode_to_utf8_bom(p: Path, dry_run: bool = False) -> bool:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description="Force .md to UTF-8 BOM + LF（仅处理显式给出的文件路径）")
+    ap = argparse.ArgumentParser(description="Force .md to UTF-8 (no BOM) + CRLF（仅处理显式给出的文件路径）")
     ap.add_argument("--check", action="store_true", help="Only check; non-zero exit if any file would be rewritten")
     ap.add_argument("files", nargs='+', help='项目相对路径，如 docs/1234567890_标题.md')
     args = ap.parse_args(argv)

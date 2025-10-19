@@ -27,7 +27,7 @@ r"""
 索引块由以下标记包裹，便于幂等更新：
   <!-- DOCS-SUMMARY-INDEX:START --> ... <!-- DOCS-SUMMARY-INDEX:END -->
 
-读写编码：UTF-8 (with BOM)
+读写编码：UTF-8（无 BOM），行尾统一写回 CRLF
 """
 
 import os
@@ -47,9 +47,9 @@ def read_text(path: str):
 
 
 def write_text(path: str, text: str, nl: str):
-    # README 与 docs 写回统一使用 LF，避免 CRLF/LF 混用导致 Git 警告
-    text = text.replace('\r\n', '\n').replace('\r', '\n')
-    with open(path, 'w', encoding='utf-8-sig', newline='\n') as f:
+    # README 与 docs 写回统一使用 CRLF（与 .gitattributes 保持一致）
+    text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n')
+    with open(path, 'w', encoding='utf-8', newline='') as f:
         f.write(text)
 
 

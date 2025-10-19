@@ -8,8 +8,8 @@
 *.sh       text eol=lf
 .githooks/* text eol=lf
 
-# Markdown and docs — LF; encoding handled by scripts (UTF-8 BOM)
-*.md       text eol=lf
+# Markdown and docs — CRLF; encoding is UTF-8 (no BOM)
+*.md       text eol=crlf
 
 # JSON/CSV and config files — LF for stable diffs
 *.json     text eol=lf
@@ -21,4 +21,3 @@
 *.bat      text eol=crlf
 *.cmd      text eol=crlf
 *.ps1      text eol=crlf
-

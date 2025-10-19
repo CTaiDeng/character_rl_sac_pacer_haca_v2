@@ -19,7 +19,7 @@ r"""
 为 docs 根目录下符合 `^\d+_.*\.md$` 的 Markdown 文档在文末追加统一许可声明页脚；已存在则不重复插入。
 
 - 作用范围：仅限 docs/ 顶层，不递归子目录（例如跳过 docs/kernel_reference/）。
-- 编码与行尾：写回 UTF-8（带 BOM）+ LF。
+- 编码与行尾：写回 UTF-8（无 BOM）+ CRLF。
 - 版式要求：在分隔线 `---` 前后均保留一个空行（即文档末尾内容，与 `---` 之间有 1 个空行；`---` 与“许可声明”标题之间也有 1 个空行）。
 """
 
@@ -86,15 +86,15 @@ def standardize_existing_footer(text: str, footer_block: str) -> str:
     return body + "\n\n" + footer_block
 
 
-def normalize_lf(s: str) -> str:
-    return s.replace("\r\n", "\n").replace("\r", "\n")
+def normalize_crlf(s: str) -> str:
+    # Normalize to LF first, then convert to CRLF
+    lf = s.replace("\r\n", "\n").replace("\r", "\n")
+    return lf.replace("\n", "\r\n")
 
 
-def write_utf8_bom(path: Path, text: str) -> None:
-    data = normalize_lf(text)
-    with open(path, "wb") as f:
-        f.write(b"\xef\xbb\xbf")  # UTF-8 BOM
-        f.write(data.encode("utf-8"))
+def write_utf8_crlf(path: Path, text: str) -> None:
+    data = normalize_crlf(text)
+    path.write_text(data, encoding="utf-8", newline="")
 
 
 def _git_first_add_year(repo: Path, file_path: Path) -> int | None:
@@ -150,7 +150,7 @@ def process_dir(d: Path, dry_run: bool = False) -> int:
             text = p.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             continue
-        norm = normalize_lf(text)
+        norm = normalize_crlf(text)
         # 动态年份：创立年（文件名时间戳 -> git 首次入库 -> 文件创建时间）与最后修改年（git 最近提交 -> mtime）
         create_year = _creation_year_from_name(p)
         if create_year is None:
@@ -167,11 +167,11 @@ def process_dir(d: Path, dry_run: bool = False) -> int:
         else:
             # 统一在末尾追加；确保分隔线前有一个空行
             base = norm.rstrip("\n")
-            new_text = base + "\n\n" + footer_block
+            new_text = base + "\r\n\r\n" + footer_block
         if dry_run:
             print(f"[insert_docs_license_footer] DRY add footer: {p}")
         else:
-            write_utf8_bom(p, new_text)
+            write_utf8_crlf(p, new_text)
         updated += 1
     return updated
 
@@ -197,7 +197,7 @@ def main() -> int:
                 text = p.read_text(encoding="utf-8", errors="ignore")
             except Exception:
                 continue
-            norm = normalize_lf(text)
+            norm = normalize_crlf(text)
             create_year = _creation_year_from_name(p)
             if create_year is None:
                 cy = _git_first_add_year(root, p)
@@ -210,12 +210,12 @@ def main() -> int:
             if has_footer(norm):
                 new_text = standardize_existing_footer(norm, footer_block)
             else:
-                base = norm.rstrip("\n")
-                new_text = base + "\n\n" + footer_block
+                base = norm.rstrip("\r\n")
+                new_text = base + "\r\n\r\n" + footer_block
             if dry:
                 print(f"[insert_docs_license_footer] DRY add footer: {p}")
             else:
-                write_utf8_bom(p, new_text)
+                write_utf8_crlf(p, new_text)
             updated += 1
         return updated
     n = _process(files)

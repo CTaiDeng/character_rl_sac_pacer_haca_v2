@@ -21,7 +21,7 @@
 - 规则：标题 = 去除时间戳前缀后的文件名（去扩展名）。
 - 仅处理 docs 目录下的 Markdown。
 - 若文件无标题，则在文件最前插入一行 "# <标题>"，并保留原内容。
-- 编码：UTF-8（with BOM）。
+- 编码与行尾：写回 UTF-8（无 BOM）+ CRLF。
 
 用法：
   python scripts/ensure_title_equals_filename.py [<files_or_dirs>...]
@@ -88,9 +88,9 @@ def read_text(path: Path) -> tuple[str, str]:
 
 
 def write_text(path: Path, text: str, nl: str) -> None:
-    # 统一写回为 LF；与 .gitattributes 约定一致
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    with open(path, "w", encoding="utf-8-sig", newline="\n") as f:
+    # 统一写回为 CRLF；与 .gitattributes 约定一致
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+    with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(text)
 
 

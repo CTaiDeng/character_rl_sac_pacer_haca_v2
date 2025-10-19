@@ -73,9 +73,10 @@ def read_text(path: Path) -> Tuple[str, str]:
 
 
 def write_text(path: Path, text: str) -> None:
-    # 写回为 UTF-8（BOM）+ LF
-    data = ('\ufeff' + to_lf(text)).encode('utf-8')
-    path.write_bytes(data)
+    # 写回为 UTF-8（无 BOM）+ CRLF
+    lf = to_lf(text)
+    crlf = lf.replace('\n', '\r\n')
+    path.write_text(crlf, encoding='utf-8', newline='')
 
 
 def sanitize_title_for_filename(title: str) -> str:

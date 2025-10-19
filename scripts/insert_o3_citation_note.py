@@ -13,7 +13,7 @@
 注释内容（单行）：
   #### ***注：“O3理论/O3元数学理论/主纤维丛版广义非交换李代数(PFB-GNLA)”相关理论参见： [作者（GaoZheng）网盘分享](https://drive.google.com/drive/folders/1lrgVtvhEq8cNal0Aa0AjeCNQaRA8WERu?usp=sharing) 或 [作者（GaoZheng）开源项目](https://github.com/CTaiDeng/open_meta_mathematical_theory) 或 [作者（GaoZheng）主页](https://mymetamathematics.blogspot.com)，欢迎访问！***
 
-写回编码：UTF-8（BOM）+ LF。
+写回编码：UTF-8（无 BOM）+ CRLF。
 仅处理显式传入的文件列表；不接受目录参数，避免误处理 scripts/README.md 等非知识库文件。
 """
 
@@ -40,9 +40,11 @@ NOTE = '#### ***注：“O3理论/O3元数学理论/主纤维丛版广义非交�
 DATE_LINE_RE = re.compile(r'^\s*-\s*日期：\d{4}-\d{2}-\d{2}\s*$', re.M)
 
 
-def _to_lf(s: str) -> str:
-    # 统一换行并清理潜在的 BOM 字符
-    return s.replace('\r\n', '\n').replace('\r', '\n').replace('\ufeff', '')
+def _to_crlf(s: str) -> str:
+    # 统一换行为 CRLF，并清理潜在的 BOM 字符
+    s = s.replace('\ufeff', '')
+    lf = s.replace('\r\n', '\n').replace('\r', '\n')
+    return lf.replace('\n', '\r\n')
 
 
 def _should_inject(text: str) -> bool:
@@ -75,8 +77,8 @@ def process_file(path: Path) -> bool:
     new_text = _insert_note(raw)
     if new_text == raw:
         return False
-    # 写回 UTF-8（BOM）+ LF
-    path.write_text(_to_lf(new_text), encoding='utf-8-sig')
+    # 写回 UTF-8（无 BOM）+ CRLF
+    path.write_text(_to_crlf(new_text), encoding='utf-8')
     print(f"[insert_o3_note] injected: {path}")
     return True
 

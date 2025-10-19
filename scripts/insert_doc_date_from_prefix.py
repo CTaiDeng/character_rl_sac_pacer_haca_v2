@@ -12,7 +12,7 @@
 - 目录列表：docs/；my_docs/project_docs/；my_project/gmx_split_20250924_011827/docs/。
 - 日期来源：文件名中的秒级时间戳（不从 git 取），对应 UTC→本地时间的 YYYY-MM-DD（使用本地时区）。
 - 插入位置：文档首个以 # 开头的标题下方一行；若已有“日期：”行则就地更新。
-- 编码：读写均为 UTF-8（BOM），行尾规范化为 LF。
+ - 编码：读写均为 UTF-8（无 BOM），行尾规范化为 CRLF。
 """
 
 from __future__ import annotations
@@ -45,9 +45,9 @@ def read_text(path: Path) -> Tuple[str, str]:
 
 
 def write_text(path: Path, text: str, nl: str) -> None:
-    # 统一为 LF 写回（仓库规范），并带 BOM
-    text = text.replace('\r\n', '\n').replace('\r', '\n')
-    with open(path, 'w', encoding='utf-8-sig', newline='\n') as f:
+    # 统一为 CRLF 写回（仓库规范），UTF-8 无 BOM
+    text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n')
+    with open(path, 'w', encoding='utf-8', newline='') as f:
         f.write(text)
 
 

@@ -35,8 +35,9 @@ def read_text(path: str):
 
 
 def write_text(path: str, text: str, nl: str):
-    text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', nl)
-    with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+    # 统一写回 CRLF，UTF-8 无 BOM
+    text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n')
+    with open(path, 'w', encoding='utf-8', newline='') as f:
         f.write(text)
 
 
