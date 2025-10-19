@@ -1,4 +1,4 @@
-﻿# Licensing for this Directory
+# Licensing for this Directory
 
 All documents, theories, and knowledge base articles within this directory (excluding subdirectories) are licensed under the **Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License (CC BY-NC-ND 4.0)**.
 

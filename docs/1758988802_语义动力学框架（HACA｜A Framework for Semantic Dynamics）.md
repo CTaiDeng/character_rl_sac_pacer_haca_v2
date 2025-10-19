@@ -1,4 +1,4 @@
-﻿# 语义动力学框架（A Framework for Semantic Dynamics）
+# 语义动力学框架（A Framework for Semantic Dynamics）
 
 - 作者：GaoZheng
 - 日期：2025-09-28
