@@ -214,6 +214,27 @@ def ensure_meta_and_collect(path: Path, default_author: str = 'GaoZheng') -> Tup
     base_ts = int(base_dt.timestamp())
     info = DocInfo(path=path, title=title, date_str=date_str, base_ts=base_ts)
 
+    # 规范“摘要”标题为二级标题：## 摘要：
+    # 仅在文首范围内查找一次，兼容旧样式 ###/####，并补全中文冒号。
+    normalized_summary = False
+    for i, ln in enumerate(lines[:200]):
+        if re.match(r'^\s*#{3,}\s*摘要\s*[:：]?\s*$', ln):
+            lines[i] = '## 摘要：'
+            changed = True
+            normalized_summary = True
+            break
+        if re.match(r'^\s*##\s*摘要\s*$', ln):
+            lines[i] = '## 摘要：'
+            changed = True
+            normalized_summary = True
+            break
+        if re.match(r'^\s*##\s*摘要\s*[:：]\s*$', ln):
+            if ln.strip() != '## 摘要：':
+                lines[i] = '## 摘要：'
+                changed = True
+            normalized_summary = True
+            break
+
     if changed:
         write_text(path, '\n'.join(lines))
     return info, changed

@@ -155,6 +155,61 @@ def extract_summary(path: str) -> str:
         return " ".join(cleaned).strip()
     return ""
 
+def extract_summary(path: str) -> str:
+    text, _nl = read_text(path)
+    # 1) 注释块优先
+    m = re.search(r"<!--\s*SUMMARY-START\s*-->(.*?)<!--\s*SUMMARY-END\s*-->", text, flags=re.DOTALL)
+    if m:
+        summary = m.group(1).strip()
+        return " ".join(line.strip() for line in summary.splitlines() if line.strip())
+    # 2) H2/H3 摘要标题后的首段
+    lines = text.splitlines()
+    # 2.1 H2 优先：## 摘要：
+    for i, ln in enumerate(lines):
+        if re.match(r"^\s*##\s*摘要\s*[:：]?\s*$", ln):
+            j = i + 1
+            while j < len(lines) and lines[j].strip() == "":
+                j += 1
+            buf = []
+            while j < len(lines):
+                if lines[j].strip() == "": break
+                if re.match(r"^\s*#{2,}\s+", lines[j]): break
+                if lines[j].strip() == "---": break
+                buf.append(lines[j].strip())
+                j += 1
+            return " ".join(buf).strip()
+    # 2.2 兼容 H3+ 旧样式：### 摘要：
+    for i, ln in enumerate(lines):
+        if re.match(r"^\s*#{3,}\s*摘要\s*[:：]?\s*$", ln):
+            j = i + 1
+            while j < len(lines) and lines[j].strip() == "":
+                j += 1
+            buf = []
+            while j < len(lines):
+                if lines[j].strip() == "": break
+                if re.match(r"^\s*#{2,}\s+", lines[j]): break
+                if lines[j].strip() == "---": break
+                buf.append(lines[j].strip())
+                j += 1
+            return " ".join(buf).strip()
+    # 3) 兼容引文块：> 摘要：
+    start=None; end=None
+    for i, ln in enumerate(lines[:120]):
+        if ln.lstrip().startswith(">") and ("摘要" in ln):
+            start=i; j=i
+            while j < len(lines) and lines[j].lstrip().startswith(">"): j+=1
+            end=j; break
+    if start is not None and end is not None:
+        cleaned=[]
+        for b in lines[start:end]:
+            s=b.lstrip()
+            if s.startswith(">"): s=s[1:]
+            s=s.strip()
+            s=re.sub(r"^摘要\s*[:：]\s*","",s)
+            if s: cleaned.append(s)
+        return " ".join(cleaned).strip()
+    return ""
+
 def collect_docs(root: str) -> List[str]:
     p = os.path.join(root, 'docs')
     if not os.path.isdir(p):
