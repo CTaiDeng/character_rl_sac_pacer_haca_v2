@@ -1,4 +1,4 @@
-﻿#+ 数据工具与映射说明
+# 数据工具与映射说明
 
 - 输入-输出-打分映射（JSON）
   - 文件：`data/io_score_mapping.json`
