@@ -17,6 +17,7 @@
       ]
     }
   },
-  "terminal.integrated.defaultProfile.windows": "PowerShell (Workspace Venv)"
+  "terminal.integrated.defaultProfile.windows": "PowerShell (Workspace Venv)",
+  "git.autoRepositoryDetection": "subFolders",
+  "git.repositoryScanMaxDepth": 0
 }
-
