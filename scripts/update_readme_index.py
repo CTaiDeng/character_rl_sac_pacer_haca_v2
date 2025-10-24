@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2025 GaoZheng
@@ -113,6 +113,7 @@ def ensure_summary_in_doc(path: str) -> Tuple[str, bool]:
     new_text = '\n'.join(updated_lines)
     write_text(path, new_text, nl)
     return 'TODO：请补充本篇文档摘要（120–300字）。', True
+
 
 
 def extract_summary(path: str) -> str:

@@ -1,4 +1,4 @@
-﻿# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2025 GaoZheng
 # 
 # This program is free software: you can redistribute it and/or modify
