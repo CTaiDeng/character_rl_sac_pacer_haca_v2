@@ -1,3 +1,6 @@
+# Encoding/EOL policy: UTF-8 (no BOM) + LF
+# 此注释仅为协作者提示；实际换行规范请以 AGENTS.md/.gitattributes 为准。
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

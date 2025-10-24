@@ -19,7 +19,7 @@
 - 文档摘要同步：`docs/*.md` 顶部维护“摘要”块；`README.md` 文末维护统一索引；任一侧调整需双向同步。
 - 对齐流程：新增/重命名/迁移 `docs` 后执行 `python scripts/align_docs.py` 重写时间戳前缀、更新日期行、重建 README 索引并规范化 Markdown。
 - Markdown 规范：行间 `$$ … $$`、行内 `$ … $`；围栏代码块不转换；行内代码使用反引号。
-- 文档编码与行尾：统一 UTF-8（无 BOM）+ CRLF（最高优先级）。
+- 文档编码与行尾：统一 UTF-8（无 BOM）+ LF（最高优先级）。
 
 **常用指令**
 - 对齐脚本：`python scripts/align_docs.py`
@@ -53,7 +53,7 @@
 - 对齐严格禁止改动原文章内容；若文章缺少摘要，README 仅显示占位提示，不回写文档。
 - 新增或重命名文档时，应同时在 `README.md` 的摘要索引中增删对应条目。
 - 禁止维护 `docs/SUMMARIES.md` 等独立摘要清单，避免三方不同步。
-- 文档编码统一为 UTF-8（无 BOM），并统一写回 CRLF 行尾（跨平台一致，避免混用）。
+- 文档编码统一为 UTF-8（无 BOM），并统一写回 LF 行尾（跨平台一致，避免混用）。
 
 ## 文档对齐指令与整理流程（docs/*）
 
@@ -67,7 +67,7 @@
   - 依次执行：
   1) `scripts/ensure_docs_style_from_date.py`（根据文内“日期”与标题规范文首样式，并将文件名重命名为“时间戳_标题.md”，其中时间戳取文内日期的本地 00:00:00 秒；同日冲突按标题名降序依次向前一秒分配；同时将任何 `### 摘要`/更深层级标题统一规范为 `## 摘要`，并移除末尾冒号）；
   2) `scripts/insert_o3_citation_note.py`（按关键词插入 O3 注释）；
-  3) `scripts/force_docs_utf8_bom.py`（历史命名，实际行为：强制 docs 顶层 `.md` 重写为 UTF-8（无 BOM）+ CRLF，修复潜在中文乱码与行尾不一致）；
+  3) `scripts/force_docs_utf8_bom.py`（历史命名，实际行为：强制 docs 顶层 `.md` 重写为 UTF-8（无 BOM）+ LF，修复潜在中文乱码与行尾不一致）；
   4) `scripts/insert_docs_license_footer.py`（为 docs 顶层 `^\d+_.*\.md$` 文档追加许可页脚）；
   5) `scripts/update_readme_index.py`（重建 README 文末索引）；
   6) `scripts/md_normalize.py`（对 README 与 docs 做 Markdown 规范化）。
@@ -91,7 +91,7 @@
     1) `$$ ... $$` → `$$ ... $$`（忽略以双反斜杠开头的 `\\[2pt]` 等行内可选参数）；
     2) `$ ... $` → `$ ... $`；
     3) `` `inline_code` `` → ``inline_code``。
-- 读写编码使用 UTF-8（无 BOM），并统一写回 CRLF 行尾（跨平台一致，避免混用）。
+- 读写编码使用 UTF-8（无 BOM），并统一写回 LF 行尾（跨平台一致，避免混用）。
 - 提交钩子：`.githooks/pre-commit` 会在提交前自动：
   - 仅对已暂存的 `.md` 执行规范化；
   - 运行 `scripts/update_readme_index.py` 同步 `README.md` 文末的 docs 摘要索引；
@@ -218,7 +218,7 @@
 - 年份规则：版权行年份取文档创立年份；若文档最近修改年份晚于创立年份，则使用“创立年-最近修改年”形式（创立年优先从文件名时间戳解析，失败则回退到 git 首次入库时间，再失败回退到文件创建时间；最近修改年优先取 git 最近提交时间，失败回退到文件修改时间）。
 - 版权行格式：年份或年份范围后接一个空格与作者名，例如“Copyright (C) 2025 GaoZheng”或“Copyright (C) 2024-2025 GaoZheng”；严禁在年份与作者名之间使用连字符（错误示例：2025- GaoZheng）。
 - 执行工具：`python scripts/insert_docs_license_footer.py`；已集成于 `scripts/align_docs.py` 与 `.githooks/pre-commit`，提交前与对齐流程会自动补齐。
-- 编码与行尾：写回统一为 UTF-8（无 BOM）+ CRLF；不影响文首“摘要”或“日期”规范。
+- 编码与行尾：写回统一为 UTF-8（无 BOM）+ LF；不影响文首“摘要”或“日期”规范。
 - 与代码许可的关系：该页脚仅适用于知识库文档，独立于源代码的 GPL 许可头部要求。
 
 ## docs 文章样式规范（时间戳_标题.md）
@@ -247,7 +247,7 @@
   - 保留可执行/解析前导：在 `shebang`（如 `#!/usr/bin/env python`）、Python 编码声明行、XML 声明（`<?xml …?>`）或 `<?php` 之后插入头部；其余文件放在第一行。
   - 注释风格随语言采用哈希行（`#`）、C/Java/JS 块注释（`/* … */`）、XML/HTML 注释（`<!-- … -->`）、SQL/Lua 等双横线（`--`）等与语言相符的形式。
 - 执行与校验：
-  - 标准脚本：`scripts/add_gpl_header.ps1` 用于批量插入或校验头部；默认跳过 Markdown 与只读目录 `docs/kernel_reference/`，写回编码统一为 UTF-8（BOM）+ LF；具备防重复能力（检测 SPDX 或 GPL 关键字）。
+  - 标准脚本：`scripts/add_gpl_header.ps1` 用于批量插入或校验头部；默认跳过 Markdown 与只读目录 `docs/kernel_reference/`，写回编码统一为 UTF-8（无 BOM）+ LF；具备防重复能力（检测 SPDX 或 GPL 关键字）。
   - 推荐在提交前执行一次 DryRun：`pwsh ./scripts/add_gpl_header.ps1 -Root . -DryRun`；如需实际写入：`pwsh ./scripts/add_gpl_header.ps1 -Root .`。
 - 与文档许可的关系：代码采用 GPL-3.0-only 许可头部；`docs/` 目录内文档遵循 `docs/LICENSE.md` 所述的 CC BY-NC-ND 4.0 许可，二者相互独立、互不干扰。
 - 版本与变更：若年份或作者变更，需同步更新本条款与脚本参数，并在必要时批量重写头部。
