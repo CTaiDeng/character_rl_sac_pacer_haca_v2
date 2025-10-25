@@ -267,7 +267,6 @@
 - .gitignore：不控制编码与行尾；无需为 CRLF 设特例。保留并维护现有的临时产物忽略条目即可。
 
 ### Python/PowerShell 写回策略（新增）
-- Python 全局：新增仓根 `sitecustomize.py`，自动覆盖 `builtins.open` 的“文本写入”默认参数（未显式指定时强制 `encoding='utf-8'`、`newline='\n'`），并重写 `pathlib.Path.write_text` 归一化换行为 LF。设置 `DISABLE_UTF8LF_SITEPATCH=1` 可临时关闭。
-- 子目录执行兼容：新增 `scripts/sitecustomize.py` 将仓根加入 `sys.path` 并导入根 `sitecustomize`，保证在 `cd scripts && python xxx.py` 场景同样生效。
-- Python 帮助库：新增 `scripts/io_utf8lf.py`（`write_text/open_utf8lf/write_json`）供脚本显式调用。
-- PowerShell 帮助库：新增 `scripts/ps_utf8lf.ps1`（`Write-TextUtf8Lf`/`Append-TextUtf8Lf`）供 `.ps1` 显式导入使用；避免 `Out-File/Set-Content` 产生 CRLF 或 BOM。
+- Python 自动补丁：`scripts/sitecustomize.py` 在从 `scripts/` 目录运行脚本或启动 REPL 时会被自动导入，覆盖文本写入默认参数（未显式指定时强制 `encoding='utf-8'`、`newline='\n'`），并重写 `pathlib.Path.write_text` 归一化为 LF。可用 `DISABLE_UTF8LF_SITEPATCH=1` 临时关闭。
+- Python 帮助库：`scripts/io_utf8lf.py`（`write_text/open_utf8lf/write_json`）供脚本显式调用，增强可读性与可控性。
+- PowerShell 帮助库：`scripts/ps_utf8lf.ps1`（`Write-TextUtf8Lf`/`Append-TextUtf8Lf`）供 `.ps1` 显式导入使用；避免 `Out-File/Set-Content` 产生 CRLF 或 BOM。
