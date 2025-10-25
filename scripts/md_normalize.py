@@ -170,3 +170,12 @@ def main(argv: List[str]) -> int:
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
+
+# --- Enforce LF writes (UTF-8 + LF) ---
+def _write_text_lf_override(path: str, text: str, newline: str) -> None:
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    with open(path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(text)
+
+# Rebind write_text to LF-only variant
+write_text = _write_text_lf_override  # type: ignore
