@@ -18,7 +18,11 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
 from pathlib import Path
 from typing import List, Tuple
 import argparse
@@ -94,7 +98,15 @@ def process_files(files: List[Path]) -> int:
             continue
         try:
             ts = int(m.group(1))
-            dt = datetime.fromtimestamp(ts)
+            tz = None
+            if ZoneInfo is not None:
+                try:
+                    tz = ZoneInfo('Asia/Shanghai')
+                except Exception:
+                    tz = None
+            if tz is None:
+                tz = timezone(timedelta(hours=8))  # Fallback to UTC+8
+            dt = datetime.fromtimestamp(ts, tz=tz)
             date_str = dt.strftime('%Y-%m-%d')
         except Exception:
             continue

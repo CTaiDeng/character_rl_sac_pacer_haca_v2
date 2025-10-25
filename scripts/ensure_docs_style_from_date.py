@@ -35,7 +35,11 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import argparse
@@ -122,6 +126,15 @@ def ensure_meta_and_collect(path: Path, default_author: str = 'GaoZheng') -> Tup
     lines = to_lf(text).split('\n')
     title, h1_idx = parse_title(lines)
     changed = False
+    # Resolve Beijing timezone (UTC+8)
+    tz = None
+    if ZoneInfo is not None:
+        try:
+            tz = ZoneInfo('Asia/Shanghai')
+        except Exception:
+            tz = None
+    if tz is None:
+        tz = timezone(timedelta(hours=8))
     if title is None:
         # 未找到 H1 标题，跳过
         return None, False
@@ -138,18 +151,18 @@ def ensure_meta_and_collect(path: Path, default_author: str = 'GaoZheng') -> Tup
     # Date
     if date_idx is not None:
         mdate0 = DATE_RE.match(lines[date_idx])
-        date_val = mdate0.group(1) if mdate0 else datetime.now().strftime('%Y-%m-%d')
+        date_val = mdate0.group(1) if mdate0 else datetime.now(tz).strftime('%Y-%m-%d')
     else:
         m = NAME_RE.match(path.name)
         if m:
             try:
                 ts = int(m.group(1))
-                dt = datetime.fromtimestamp(ts)
+                dt = datetime.fromtimestamp(ts, tz=tz)
                 date_val = dt.strftime('%Y-%m-%d')
             except Exception:
-                date_val = datetime.now().strftime('%Y-%m-%d')
+                date_val = datetime.now(tz).strftime('%Y-%m-%d')
         else:
-            date_val = datetime.now().strftime('%Y-%m-%d')
+            date_val = datetime.now(tz).strftime('%Y-%m-%d')
     date_line = f'- 日期：{date_val}'
     # Version
     if version_idx is not None:
@@ -210,8 +223,17 @@ def ensure_meta_and_collect(path: Path, default_author: str = 'GaoZheng') -> Tup
     date_str = mdate.group(1)
 
     # Build DocInfo
-    base_dt = datetime.strptime(date_str, '%Y-%m-%d')
-    # Local midnight epoch seconds
+    # Interpret as Beijing time (UTC+8) midnight
+    naive = datetime.strptime(date_str, '%Y-%m-%d')
+    tz = None
+    if ZoneInfo is not None:
+        try:
+            tz = ZoneInfo('Asia/Shanghai')
+        except Exception:
+            tz = None
+    if tz is None:
+        tz = timezone(timedelta(hours=8))  # Fallback to UTC+8
+    base_dt = naive.replace(tzinfo=tz)
     base_ts = int(base_dt.timestamp())
     info = DocInfo(path=path, title=title, date_str=date_str, base_ts=base_ts)
 

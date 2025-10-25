@@ -270,3 +270,8 @@
 - Python 自动补丁：`scripts/sitecustomize.py` 在从 `scripts/` 目录运行脚本或启动 REPL 时会被自动导入，覆盖文本写入默认参数（未显式指定时强制 `encoding='utf-8'`、`newline='\n'`），并重写 `pathlib.Path.write_text` 归一化为 LF。可用 `DISABLE_UTF8LF_SITEPATCH=1` 临时关闭。
 - Python 帮助库：`scripts/io_utf8lf.py`（`write_text/open_utf8lf/write_json`）供脚本显式调用，增强可读性与可控性。
 - PowerShell 帮助库：`scripts/ps_utf8lf.ps1`（`Write-TextUtf8Lf`/`Append-TextUtf8Lf`）供 `.ps1` 显式导入使用；避免 `Out-File/Set-Content` 产生 CRLF 或 BOM。
+
+## 规则修订（2025-10-25 补充）
+
+- 时区与日期：规范中出现的“本地”一律指北京时间（Asia/Shanghai，UTC+8）。所有与文档日期和时间戳的互换（如“文内日期 → 文件名前缀秒时间戳”的 00:00:00 与“文件名前缀秒时间戳 → 文内日期”的 YYYY‑MM‑DD）均以北京时间计算与显示。
+- 脚本对齐：`scripts/ensure_docs_style_from_date.py` 与 `scripts/insert_doc_date_from_prefix.py` 已按上述时区实现，避免因系统本地时区不同导致的偏移。
