@@ -3,11 +3,11 @@
   "exclude": [
   ],
   "exclude_files": [
-    "data\\chapter_iterative_io_examples.txt",
-    "data\\chinese_frequency_word.json",
-    "data\\chinese_name_frequency_word.json",
-    "data\\sample_article_lexical.json",
-    "data\\sample_article.txt",
+    "data/chapter_iterative_io_examples.txt",
+    "data/chinese_frequency_word.json",
+    "data/chinese_name_frequency_word.json",
+    "data/sample_article_lexical.json",
+    "data/sample_article.txt",
     "partial_clone_exclude_whitelist.json"
   ]
 }
