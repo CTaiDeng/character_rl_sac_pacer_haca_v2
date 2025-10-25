@@ -16,9 +16,9 @@
 # along with this program. If not, see https://www.gnu.org/licenses/.
 
 """
-Force re-encode docs top-level Markdown files to UTF-8 (no BOM) with CRLF line endings.
-- Scope: docs/ (top-level files only), excludes subdirectories.
-- Strategy: try UTF-8 decode first; if fails, try GBK (cp936) as fallback. Always write back UTF-8 (no BOM) + CRLF.
+Normalize Markdown files to UTF-8 (no BOM) with LF line endings.
+- Scope: explicit files (top-level docs by caller), excludes subdirectories unless passed.
+- Strategy: try UTF-8 decode first; if fails, try GBK (cp936) as fallback. Always write back UTF-8 (no BOM) + LF.
 - Check mode: with --check, do not write; exit non-zero if any file would be rewritten.
 """
 
@@ -34,13 +34,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 
 
-def to_crlf(s: str) -> str:
-    # Normalize to LF first, then expand to CRLF
-    lf = s.replace("\r\n", "\n").replace("\r", "\n")
-    return lf.replace("\n", "\r\n")
+def to_lf(s: str) -> str:
+    # Normalize to LF
+    return s.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def recode_to_utf8_bom(p: Path, dry_run: bool = False) -> bool:
+def recode_to_utf8_lf(p: Path, dry_run: bool = False) -> bool:
     b = p.read_bytes()
     text = None
     try:
@@ -50,8 +49,8 @@ def recode_to_utf8_bom(p: Path, dry_run: bool = False) -> bool:
             text = b.decode("gbk")
         except Exception:
             return False
-    # Normalize newlines to CRLF and compute output (UTF-8, no BOM)
-    norm = to_crlf(text)
+    # Normalize newlines to LF and compute output (UTF-8, no BOM)
+    norm = to_lf(text)
     out_b = norm.encode("utf-8")
     changed = (out_b != b)
     if dry_run:
@@ -70,15 +69,15 @@ def main(argv: list[str]) -> int:
     updated = 0
     for p in files:
         try:
-            would = recode_to_utf8_bom(p, dry_run=True)
+            would = recode_to_utf8_lf(p, dry_run=True)
             if args.check:
                 if would:
                     updated += 1
                     print(f"[force_docs_utf8_bom] would rewrite: {p}")
                 continue
-            if recode_to_utf8_bom(p, dry_run=False):
+            if recode_to_utf8_lf(p, dry_run=False):
                 updated += 1
-                print(f"[force_docs_utf8_bom] rewrote: {p}")
+                print(f"[force_docs_utf8_bom] rewrote LF: {p}")
         except Exception as e:
             print(f"[force_docs_utf8_bom] skip {p}: {e}")
     print(f"[force_docs_utf8_bom] updated={updated}")
