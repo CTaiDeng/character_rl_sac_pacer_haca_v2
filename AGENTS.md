@@ -265,3 +265,9 @@
 - 钩子策略：启用 `.githooks/pre-commit`，基于 `.gitattributes` 对所有暂存的文本文件执行 UTF-8（无 BOM）+ LF 的只读校验；校验失败将阻止提交；钩子不做任何自动修改。可用环境变量 `SKIP_UTF8LF_CHECK=1` 临时跳过（CI 禁止）。
 - 脚本同步：涉及写回文件的脚本一律以 UTF-8（无 BOM）+ LF 写出；如需批量修复，推荐执行 `git add --renormalize .`，再按需逐个处理不合规文件并重新暂存。
 - .gitignore：不控制编码与行尾；无需为 CRLF 设特例。保留并维护现有的临时产物忽略条目即可。
+
+### Python/PowerShell 写回策略（新增）
+- Python 全局：新增仓根 `sitecustomize.py`，自动覆盖 `builtins.open` 的“文本写入”默认参数（未显式指定时强制 `encoding='utf-8'`、`newline='\n'`），并重写 `pathlib.Path.write_text` 归一化换行为 LF。设置 `DISABLE_UTF8LF_SITEPATCH=1` 可临时关闭。
+- 子目录执行兼容：新增 `scripts/sitecustomize.py` 将仓根加入 `sys.path` 并导入根 `sitecustomize`，保证在 `cd scripts && python xxx.py` 场景同样生效。
+- Python 帮助库：新增 `scripts/io_utf8lf.py`（`write_text/open_utf8lf/write_json`）供脚本显式调用。
+- PowerShell 帮助库：新增 `scripts/ps_utf8lf.ps1`（`Write-TextUtf8Lf`/`Append-TextUtf8Lf`）供 `.ps1` 显式导入使用；避免 `Out-File/Set-Content` 产生 CRLF 或 BOM。

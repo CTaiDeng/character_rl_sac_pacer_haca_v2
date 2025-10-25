@@ -1,0 +1,26 @@
+#!/usr/bin/env pwsh
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2025 GaoZheng
+
+$ErrorActionPreference = 'Stop'
+
+try {
+  if ($env:SKIP_UTF8LF_CHECK) {
+    Write-Host "[pre-commit] UTF-8+LF check skipped by env." -ForegroundColor Yellow
+    exit 0
+  }
+  # 确保在仓库根目录执行
+  $root = (git rev-parse --show-toplevel 2>$null)
+  if ($root) { Set-Location $root }
+
+  if (-not (Test-Path "scripts/check_utf8_nobom_lf.ps1")) {
+    Write-Host "[pre-commit] scripts/check_utf8_nobom_lf.ps1 not found, skipping." -ForegroundColor Yellow
+    exit 0
+  }
+  pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "scripts/check_utf8_nobom_lf.ps1"
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  exit 0
+} catch {
+  Write-Host "[pre-commit] Error: $($_.Exception.Message)" -ForegroundColor Red
+  exit 1
+}

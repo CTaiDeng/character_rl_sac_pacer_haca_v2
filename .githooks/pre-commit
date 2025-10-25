@@ -1,23 +1,14 @@
-#!/usr/bin/env pwsh
-# SPDX-License-Identifier: GPL-3.0-only
-# Copyright (C) 2025 GaoZheng
+#!/usr/bin/env sh
+# POSIX shim to invoke PowerShell hook with proper extension
 
-$ErrorActionPreference = 'Stop'
+HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-try {
-  if ($env:SKIP_UTF8LF_CHECK) {
-    Write-Host "[pre-commit] UTF-8+LF check skipped by env." -ForegroundColor Yellow
-    exit 0
-  }
-  if (-not (Test-Path "scripts/check_utf8_nobom_lf.ps1")) {
-    Write-Host "[pre-commit] scripts/check_utf8_nobom_lf.ps1 not found, skipping." -ForegroundColor Yellow
-    exit 0
-  }
-  pwsh -NoLogo -NoProfile -File "scripts/check_utf8_nobom_lf.ps1"
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if command -v pwsh >/dev/null 2>&1; then
+  exec pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$HOOK_DIR/pre-commit.ps1"
+elif command -v powershell >/dev/null 2>&1; then
+  exec powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$HOOK_DIR/pre-commit.ps1"
+else
+  echo "[pre-commit] PowerShell not found; skipping UTF-8+LF check." >&2
   exit 0
-} catch {
-  Write-Host "[pre-commit] Error: $($_.Exception.Message)" -ForegroundColor Red
-  exit 1
-}
+fi
 

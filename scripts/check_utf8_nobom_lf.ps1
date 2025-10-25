@@ -19,7 +19,6 @@ param(
   [switch]$All
 )
 
-set -eo:$false
 $ErrorActionPreference = 'Stop'
 
 function Resolve-GitRoot {
@@ -103,7 +102,8 @@ if (-not $paths -or $paths.Count -eq 0) {
 
 $violations = @()
 foreach ($p in $paths) {
-  if ($p -like 'docs/kernel_reference/*' -or $p -like 'docs/kernel_reference/**') { continue }
+  $pNorm = $p -replace '\\','/'
+  if ($pNorm.StartsWith('docs/kernel_reference/')) { continue }
   $attr = Get-GitAttrMap -Path $p
   if (-not (Test-IsTextByAttr -attrMap $attr)) { continue }
 
@@ -132,4 +132,3 @@ if ($violations.Count -gt 0) {
 
 Write-Host "✔ UTF-8 (no BOM) + LF check passed." -ForegroundColor Green
 exit 0
-
