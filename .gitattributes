@@ -1,23 +1,57 @@
-# Line-ending normalization and cross-platform EOL policy
-
-# Default: auto-detect text, prefer LF
+# Normalize line endings to LF for all text files
 * text=auto eol=lf
 
-# Source code and scripts — force LF (avoids bash ^M and Python diffs)
-*.py       text eol=lf
-*.sh       text eol=lf
-.githooks/* text eol=lf
+# Common script and code files (explicit LF)
+*.sh      text eol=lf
+*.bash    text eol=lf
+*.ps1     text eol=lf
+*.py      text eol=lf
+*.js      text eol=lf
+*.ts      text eol=lf
+*.jsx     text eol=lf
+*.tsx     text eol=lf
+*.java    text eol=lf
+*.kt      text eol=lf
+*.go      text eol=lf
+*.rs      text eol=lf
+*.c       text eol=lf
+*.cpp     text eol=lf
+*.h       text eol=lf
+*.hpp     text eol=lf
+*.cs      text eol=lf
+*.lua     text eol=lf
+*.rb      text eol=lf
+*.php     text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.toml    text eol=lf
+*.ini     text eol=lf
+*.json    text eol=lf
+*.txt     text eol=lf
+*.csv     text eol=lf
+*.md      text eol=lf
 
-# Markdown and docs — CRLF; encoding is UTF-8 (no BOM)
-*.md       text eol=crlf
+# Read-only knowledge base: do not normalize or modify
+docs/kernel_reference/** -text
 
-# JSON/CSV and config files — LF for stable diffs
-*.json     text eol=lf
-*.csv      text eol=lf
-*.yml      text eol=lf
-*.yaml     text eol=lf
+# Binary files
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.svg   -text
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.7z    binary
+*.rar   binary
+*.tar   binary
+*.jar   binary
+*.dll   binary
+*.exe   binary
+*.pkl   binary
+*.onnx  binary
+*.pt    binary
+*.bin   binary
 
-# Windows-specific scripts keep CRLF
-*.bat      text eol=crlf
-*.cmd      text eol=crlf
-*.ps1      text eol=crlf

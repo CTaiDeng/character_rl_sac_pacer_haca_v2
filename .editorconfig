@@ -1,0 +1,25 @@
+# EditorConfig helps developers define and maintain consistent
+# coding styles between different editors and IDEs.
+
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Markdown: keep trailing spaces intentionally (for line breaks)
+[*.md]
+trim_trailing_whitespace = false
+
+# Shell / scripts
+[*.{sh,bash}]
+end_of_line = lf
+
+[*.ps1]
+end_of_line = lf
+
+[*.{py,js,ts,jsx,tsx,java,kt,go,rs,c,cpp,h,hpp,cs,lua,rb,php,yml,yaml,toml,ini,json,txt,csv}]
+end_of_line = lf
+
