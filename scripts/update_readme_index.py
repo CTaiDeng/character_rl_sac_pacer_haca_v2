@@ -1,302 +1,147 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2025 GaoZheng
-# 
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, version 3.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see https://www.gnu.org/licenses/.
 
-
-r"""
-从 docs/*.md 提取“摘要”并在 README.md 文末维护索引。
-
-摘要来源优先级：
-1) <!-- SUMMARY-START --> ... <!-- SUMMARY-END -->
-2) 文首首个由连续 “> ” 开头的块（常见的 “> 摘要：...” 形式）
-3) 若缺失，则在标题后自动插入占位摘要，并使用该占位内容。
-
-索引块由以下标记包裹，便于幂等更新：
-  <!-- DOCS-SUMMARY-INDEX:START --> ... <!-- DOCS-SUMMARY-INDEX:END -->
-
-读写编码：UTF-8（无 BOM），行尾统一写回 CRLF
 """
+从 docs/*.md 收集“摘要”，在 README.md 末尾维护统一索引块。
+
+规范与约束：
+- 摘要来源优先级：
+  1) <!-- SUMMARY-START -->...<!-- SUMMARY-END --> 注释块
+  2) 文中 "## 摘要" 标题后的首段正文（跳过空行）
+  3) 顶部以 "> 摘要：" 开头的连续引用行（兼容旧文档）
+- 只读策略：不修改 docs 原文内容；如缺少摘要，仅在 README 索引中显示占位提示。
+- 覆盖范围：仅顶层 docs/*.md；显式排除 docs/LICENSE.md 与 docs/kernel_reference/**。
+- 写回策略：所有写回统一 UTF-8（无 BOM）+ LF；严禁 CRLF 或 BOM。
+"""
+
+from __future__ import annotations
 
 import os
 import re
-from typing import List, Tuple
+from pathlib import Path
+from typing import Iterable, Optional
 
+# I/O 采用统一 UTF-8+LF 写回
+try:
+    from io_utf8lf import read_text as _read_text_lf, write_text as _write_text_lf  # type: ignore
+except Exception:  # 兜底：sitecustomize 也会强制 UTF-8+LF
+    _read_text_lf = None  # type: ignore
+    _write_text_lf = None  # type: ignore
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DOCS = ROOT / "docs"
+README = ROOT / "README.md"
 
 START_MARK = "<!-- DOCS-SUMMARY-INDEX:START -->"
 END_MARK = "<!-- DOCS-SUMMARY-INDEX:END -->"
 
 
-def read_text(path: str):
-    with open(path, 'rb') as f:
-        data = f.read()
-    nl = '\r\n' if b'\r\n' in data else '\n'
-    return data.decode('utf-8-sig', errors='replace'), nl
+def _read_text(path: Path) -> str:
+    if _read_text_lf is not None:
+        return _read_text_lf(path)
+    # 兼容 UTF-8-SIG；标准化为 LF
+    data = path.read_bytes()
+    text = data.decode("utf-8", errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def write_text(path: str, text: str, nl: str):
-    # README 与 docs 写回统一使用 CRLF（与 .gitattributes 保持一致）
-    text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n')
-    with open(path, 'w', encoding='utf-8', newline='') as f:
-        f.write(text)
+def _write_text(path: Path, text: str) -> None:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    if _write_text_lf is not None:
+        _write_text_lf(path, normalized)
+    else:
+        path.write_text(normalized, encoding="utf-8")
 
 
-def ensure_summary_in_doc(path: str) -> Tuple[str, bool]:
-    """返回 (摘要文本, 文档是否被更新)"""
-    text, nl = read_text(path)
-
-    # 1) 注释包裹
-    m = re.search(r"<!--\s*SUMMARY-START\s*-->(.*?)<!--\s*SUMMARY-END\s*-->", text, flags=re.DOTALL)
-    if m:
-        summary = m.group(1).strip()
-        single_line = ' '.join(line.strip() for line in summary.splitlines() if line.strip())
-        # 去重前缀“摘要：”
-        single_line = re.sub(r'^摘要\s*[:：]\s*', '', single_line)
-        return single_line, False
-
-    # 2) 连续区块引用
-    lines = text.splitlines()
-    start = None
-    end = None
-    for i, ln in enumerate(lines[:100]):  # 仅扫描前 100 行
-        if ln.lstrip().startswith('>'):
-            start = i
-            j = i
-            while j < len(lines) and lines[j].lstrip().startswith('>'):
-                j += 1
-            end = j
-            break
-    if start is not None and end is not None:
-        block = lines[start:end]
-        # 去掉前缀 '>' 和空白
-        cleaned = []
-        for b in block:
-            s = b.lstrip()
-            if s.startswith('>'):
-                s = s[1:]
-            cleaned.append(s.strip())
-        single_line = ' '.join([c for c in cleaned if c])
-        single_line = re.sub(r'^摘要\s*[:：]\s*', '', single_line)
-        return single_line, False
-
-    # 3) 无摘要：在标题后插入占位摘要
-    updated_lines = []
-    inserted = False
-    for idx, ln in enumerate(lines):
-        updated_lines.append(ln)
-        if not inserted and ln.strip().startswith('#'):
-            updated_lines.append('')
-            updated_lines.append('> 摘要：TODO：请补充本篇文档摘要（120–300字）。建议概述核心目标、方法、关键结果与适用范围。')
-            updated_lines.append('')
-            inserted = True
-    if not inserted:
-        # 若未找到标题，则在文件头部添加
-        updated_lines = [
-            '# 文档标题缺失',
-            '',
-            '> 摘要：TODO：请补充本篇文档摘要（120–300字）。建议概述核心目标、方法、关键结果与适用范围。',
-            '',
-        ] + lines
-
-    new_text = '\n'.join(updated_lines)
-    write_text(path, new_text, nl)
-    return 'TODO：请补充本篇文档摘要（120–300字）。', True
-
-
-
-def extract_summary(path: str) -> str:
-    text, _nl = read_text(path)
-    # 注释包裹优先
-    m = re.search(r"<!--\s*SUMMARY-START\s*-->(.*?)<!--\s*SUMMARY-END\s*-->", text, flags=re.DOTALL)
-    if m:
-        summary = m.group(1).strip()
-        return " ".join(line.strip() for line in summary.splitlines() if line.strip())
-    # 标题 “### 摘要：” 后的首段
-    lines = text.splitlines()
-    for i, ln in enumerate(lines):
-        if re.match(r"^\s*#{3,}\s*摘要\s*[:：]?\s*$", ln):
-            j = i + 1
-            while j < len(lines) and lines[j].strip() == "":
-                j += 1
-            buf = []
-            while j < len(lines):
-                if lines[j].strip() == "": break
-                if re.match(r"^\s*#{2,}\s+", lines[j]): break
-                if lines[j].strip() == "---": break
-                buf.append(lines[j].strip())
-                j += 1
-            return " ".join(buf).strip()
-    # 引文块 “> 摘要：” 连续行
-    start=None; end=None
-    for i, ln in enumerate(lines[:120]):
-        if ln.lstrip().startswith(">") and ("摘要" in ln):
-            start=i; j=i
-            while j < len(lines) and lines[j].lstrip().startswith(">"): j+=1
-            end=j; break
-    if start is not None and end is not None:
-        cleaned=[]
-        for b in lines[start:end]:
-            s=b.lstrip()
-            if s.startswith(">"): s=s[1:]
-            s=s.strip()
-            s=re.sub(r"^摘要\s*[:：]\s*","",s)
-            if s: cleaned.append(s)
-        return " ".join(cleaned).strip()
-    return ""
-
-def extract_summary(path: str) -> str:
-    text, _nl = read_text(path)
-    # 1) 注释块优先
-    m = re.search(r"<!--\s*SUMMARY-START\s*-->(.*?)<!--\s*SUMMARY-END\s*-->", text, flags=re.DOTALL)
-    if m:
-        summary = m.group(1).strip()
-        return " ".join(line.strip() for line in summary.splitlines() if line.strip())
-    # 2) H2/H3 摘要标题后的首段
-    lines = text.splitlines()
-    # 2.1 H2 优先：## 摘要：
-    for i, ln in enumerate(lines):
-        if re.match(r"^\s*##\s*摘要\s*[:：]?\s*$", ln):
-            j = i + 1
-            while j < len(lines) and lines[j].strip() == "":
-                j += 1
-            buf = []
-            while j < len(lines):
-                if lines[j].strip() == "": break
-                if re.match(r"^\s*#{2,}\s+", lines[j]): break
-                if lines[j].strip() == "---": break
-                buf.append(lines[j].strip())
-                j += 1
-            return " ".join(buf).strip()
-    # 2.2 兼容 H3+ 旧样式：### 摘要：
-    for i, ln in enumerate(lines):
-        if re.match(r"^\s*#{3,}\s*摘要\s*[:：]?\s*$", ln):
-            j = i + 1
-            while j < len(lines) and lines[j].strip() == "":
-                j += 1
-            buf = []
-            while j < len(lines):
-                if lines[j].strip() == "": break
-                if re.match(r"^\s*#{2,}\s+", lines[j]): break
-                if lines[j].strip() == "---": break
-                buf.append(lines[j].strip())
-                j += 1
-            return " ".join(buf).strip()
-    # 3) 兼容引文块：> 摘要：
-    start=None; end=None
-    for i, ln in enumerate(lines[:120]):
-        if ln.lstrip().startswith(">") and ("摘要" in ln):
-            start=i; j=i
-            while j < len(lines) and lines[j].lstrip().startswith(">"): j+=1
-            end=j; break
-    if start is not None and end is not None:
-        cleaned=[]
-        for b in lines[start:end]:
-            s=b.lstrip()
-            if s.startswith(">"): s=s[1:]
-            s=s.strip()
-            s=re.sub(r"^摘要\s*[:：]\s*","",s)
-            if s: cleaned.append(s)
-        return " ".join(cleaned).strip()
-    return ""
-
-def collect_docs(root: str) -> List[str]:
-    p = os.path.join(root, 'docs')
-    if not os.path.isdir(p):
+def iter_top_level_docs() -> Iterable[Path]:
+    if not DOCS.is_dir():
         return []
-    files = [os.path.join(p, fn) for fn in os.listdir(p) if fn.lower().endswith('.md') and fn != 'LICENSE.md']
-    files.sort()
-    return files
+    for p in sorted(DOCS.glob("*.md")):
+        # 排除顶层 LICENSE 与任何非文件
+        if not p.is_file():
+            continue
+        if p.name.lower() == "license.md":
+            continue
+        yield p
 
 
-def build_index_block(items: List[Tuple[str, str]]) -> str:
-    lines: List[str] = []
-    lines.append('## 文档摘要索引')
-    lines.append(START_MARK)
-    for rel_path, summary in items:
-        # 使用反引号包裹路径，遵循“行内代码保留反引号、不转换为数学字体”的规范
-        lines.append(f"- `{rel_path}`")
-        lines.append(f"  - 摘要：{summary}")
-    lines.append(END_MARK)
-    return '\n'.join(lines) + '\n'
+def extract_summary(text: str) -> Optional[str]:
+    # 1) 注释块优先
+    m = re.search(r"<!--\s*SUMMARY-START\s*-->(.*?)<!--\s*SUMMARY-END\s*-->", text, flags=re.S)
+    if m:
+        block = m.group(1).strip()
+        lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+        return " ".join(lines)
+
+    # 2) 二级标题 “## 摘要” 后首段
+    h = re.search(r"^##\s*摘要\s*$", text, flags=re.M)
+    if h:
+        start = h.end()
+        rest = text[start:]
+        # 跳过空行
+        rest = re.sub(r"^\s*\n", "", rest, count=1, flags=re.M)
+        # 取到下一空行或标题前
+        m2 = re.search(r"\n\s*\n|\n#", rest)
+        para = rest[: m2.start()] if m2 else rest
+        lines = [ln.strip() for ln in para.splitlines() if ln.strip()]
+        if lines:
+            return " ".join(lines)
+
+    # 3) 兼容旧的 > 摘要： 引用段（连续）
+    m = re.search(r"^(?:>\s*摘要\s*[:：].*?(?:\n|$))+", text, flags=re.M)
+    if m:
+        block = m.group(0)
+        lines = []
+        for ln in block.splitlines():
+            s = ln.lstrip()
+            if s.startswith(">"): s = s[1:]
+            s = s.strip()
+            if s:
+                # 去除前缀
+                s = re.sub(r"^摘要\s*[:：]\s*", "", s)
+                lines.append(s)
+        if lines:
+            return " ".join(lines)
+
+    return None
 
 
-def upsert_readme_index(root: str, items: List[Tuple[str, str]]):
-    readme = os.path.join(root, 'README.md')
-    if not os.path.isfile(readme):
-        return
-    text, nl = read_text(readme)
-    block = build_index_block(items)
-    # 移除历史重复的“文档摘要（docs）”块，避免与索引重复
-    # 使用行级定位，删除从包含 "docs" 的二级标题开始到下一个二级标题之前的内容
-    lines = text.splitlines()
-    def _is_h2(ln: str) -> bool:
-        return ln.lstrip().startswith('## ')
-    legacy_start = None
-    for idx, ln in enumerate(lines):
-        if _is_h2(ln) and 'docs' in ln:
-            legacy_start = idx
-            break
-    if legacy_start is not None:
-        legacy_end = len(lines)
-        for j in range(legacy_start + 1, len(lines)):
-            if _is_h2(lines[j]):
-                legacy_end = j
-                break
-        del lines[legacy_start:legacy_end]
-        text = '\n'.join(lines)
+def build_index_block() -> tuple[str, int]:
+    entries: list[str] = []
+    count = 0
+    for p in iter_top_level_docs():
+        count += 1
+        text = _read_text(p)
+        summary = extract_summary(text)
+        if not summary:
+            summary = "[缺少摘要：请在文首添加 '## 摘要' 或 SUMMARY 注释块]"
+        # README 中使用点击路径
+        rel_path = p.as_posix().replace(ROOT.as_posix() + "/", "")
+        entries.append(f"- `{rel_path}`\n  - {summary}")
 
-    # 移除已存在的索引块（无论位置），确保最终位于文末
-    # 移除已存在的索引块（无论位置）
-    header_block_pat = re.compile(
-        r'(?ms)^[ \t]*##[ \t]*文档摘要索引\s*\n\s*' + re.escape(START_MARK) + r'.*?' + re.escape(END_MARK) + r'\s*'
-    )
-    text = header_block_pat.sub('', text)
-    plain_block_pat = re.compile(re.escape(START_MARK) + r'.*?' + re.escape(END_MARK), re.DOTALL)
-    text = plain_block_pat.sub('', text)
-
-    # 文末追加（保留至少一行空行）
-    new_text = text.rstrip() + '\n\n' + block
-    write_text(readme, new_text, nl)
+    block = [START_MARK, "", *entries, "", END_MARK]
+    return "\n".join(block) + "\n", count
 
 
-def main():
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-    docs = collect_docs(root)
-    items: List[Tuple[str, str]] = []
-    updated_docs = 0
-    for path in docs:
-        summary = extract_summary(path)
-        rel = os.path.relpath(path, root).replace('\\', '/')
-        # 适度截断到 ~300 字符
-        summary = summary.strip()
-        if len(summary) > 320:
-            summary = summary[:317].rstrip() + '…'
-        items.append((rel, summary))
-        # 不再修改原文档，故不统计 updated
-    upsert_readme_index(root, items)
-    print(f"[update_readme_index] collected={len(items)}")
+def upsert_index_in_readme(readme_text: str, index_block: str) -> str:
+    if START_MARK in readme_text and END_MARK in readme_text:
+        pattern = re.compile(re.escape(START_MARK) + r".*?" + re.escape(END_MARK), re.S)
+        return pattern.sub(lambda _m: index_block.strip(), readme_text)
+    # 若不存在标记，则在末尾追加“## 文档摘要索引”标题与区块
+    parts = [readme_text.rstrip(), "", "## 文档摘要索引", "", index_block.strip(), ""]
+    return "\n".join(parts)
 
 
-if __name__ == '__main__':
-    main()
+def main() -> int:
+    index_block, n = build_index_block()
+    readme = _read_text(README) if README.exists() else ""
+    new_text = upsert_index_in_readme(readme, index_block)
+    _write_text(README, new_text)
+    print(f"collected={n}")
+    return 0
 
-# --- Enforce LF writes for README override (UTF-8 + LF) ---
-def _write_text_lf_override(path: str, text: str, nl: str):
-    text = text.replace('\r\n', '\n').replace('\r', '\n')
-    with open(path, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(text)
 
-# Rebind write_text to LF-only variant
-write_text = _write_text_lf_override  # type: ignore
+if __name__ == "__main__":
+    raise SystemExit(main())
