@@ -23,6 +23,31 @@ from typing import List
 
 
 ROOT = Path(__file__).resolve().parents[1]
+README = ROOT / "README.md"
+
+try:
+    # 优先使用统一 I/O 助手，确保 UTF-8（无 BOM）+ LF
+    from io_utf8lf import write_text as _write_text_lf  # type: ignore
+except Exception:
+    _write_text_lf = None  # type: ignore
+
+
+def _ensure_readme_utf8lf() -> None:
+    """最终兜底：确保 README.md 为 UTF-8（无 BOM）+ LF 写回。"""
+    if not README.exists():
+        return
+    data = README.read_bytes()
+    had_bom = data.startswith(b"\xEF\xBB\xBF")
+    if had_bom:
+        data = data[3:]
+    text = data.decode("utf-8", errors="replace")
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    if had_bom or normalized != text:
+        if _write_text_lf is not None:
+            _write_text_lf(README, normalized)
+        else:
+            # 兜底：直接用标准库强制 LF 与 UTF-8
+            README.write_text(normalized, encoding="utf-8")
 
 
 def _resolve_venv_python() -> str:
@@ -60,6 +85,8 @@ def main() -> int:
     rc |= run([py, str(ROOT / 'scripts' / 'update_readme_index.py')])
     # 仅规范化 README
     rc |= run([py, str(ROOT / 'scripts' / 'md_normalize.py'), 'README.md'])
+    # 最终兜底，确保 UTF-8（无 BOM）+ LF
+    _ensure_readme_utf8lf()
 
     if rc == 0:
         print('[align_docs] 文档对齐完成（严格模式）')
@@ -70,4 +97,3 @@ def main() -> int:
 
 if __name__ == '__main__':
     sys.exit(main())
-
