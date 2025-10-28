@@ -37,18 +37,34 @@ function Has-BOM([byte[]]$bytes) {
 function Convert-ToUtf8Lf([string]$file) {
     $bytes = [IO.File]::ReadAllBytes($file)
     $hasBom = Has-BOM $bytes
-    $utf8 = [Text.UTF8Encoding]::new($false)
-    $text = [Text.Encoding]::UTF8.GetString($bytes)
+    $utf8 = [Text.UTF8Encoding]::new($false) # 写出：UTF-8 无 BOM
+
+    # 解码时主动跳过 BOM，避免把 U+FEFF 作为普通字符写回
+    if ($hasBom -and $bytes.Length -ge 3) {
+        $text = [Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3)
+    } else {
+        $text = [Text.Encoding]::UTF8.GetString($bytes)
+    }
+
+    # 有些文件可能没有字节级 BOM，但以 U+FEFF 字符开头（历史误入）
+    $leadingFeff = ($text.Length -gt 0 -and [int][char]$text[0] -eq 0xFEFF)
+    if ($leadingFeff) { $text = $text.Substring(1) }
+
     $orig = $text
     $crlfCount = ([regex]::Matches($text, "\r\n")).Count
+    $crSoloCount = ([regex]::Matches($text, "\r(?!\n)")).Count
+
+    # 统一为 LF
     $text = $text -replace "\r\n", "`n"
     $text = $text -replace "\r(?!\n)", "`n"
-    $changed = $hasBom -or ($crlfCount -gt 0)
+
+    $changed = $hasBom -or $leadingFeff -or ($crlfCount -gt 0) -or ($crSoloCount -gt 0)
     if (-not $changed -and $orig -eq $text) {
         return [pscustomobject]@{ Changed=$false; CrLfToLf=0; BomRemoved=$false }
     }
+
     [IO.File]::WriteAllText($file, $text, $utf8)
-    return [pscustomobject]@{ Changed=$true; CrLfToLf=$crlfCount; BomRemoved=$hasBom }
+    return [pscustomobject]@{ Changed=$true; CrLfToLf=$crlfCount; BomRemoved=($hasBom -or $leadingFeff) }
 }
 
 Write-Host "[convert_to_utf8_lf] 读取配置: $ConfigPath"
@@ -95,4 +111,3 @@ foreach ($p in $fileSet) {
 }
 
 Write-Host ("[summary] total=" + $total + " changed=" + $changed + " skipped=" + $skipped)
-
