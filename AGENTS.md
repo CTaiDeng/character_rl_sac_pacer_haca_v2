@@ -190,7 +190,7 @@
 ### 受保护文档与命名冻结（新增）
 
 - 受保护清单（禁止自动重命名；仅在“明确路径 + 明确指令”下方可改动文件名）：
-  - `docs/1762876801_character_rl_sac_pacer_haca_v2 项目的著作权设计策略：“渊源”锁定与“双轨制”架构.md`
+  - `docs/1762876801_🚩🚩character_rl_sac_pacer_haca_v2 项目的著作权设计策略：“渊源”锁定与“双轨制”架构.md`
 - 执行与脚本约束：
   - `scripts/ensure_docs_style_from_date.py`：默认跳过上述受保护文档的“重命名”步骤；仅在显式传入该文件路径且加开关 `--allow-protected-rename` 时方可重命名。
   - `scripts/rename_docs_to_git_ts.py`：无论是否传入开关，均永久跳过受保护文档的重命名（仅对非受保护文档生效）。
