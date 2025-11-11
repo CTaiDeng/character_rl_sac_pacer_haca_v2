@@ -187,6 +187,16 @@
   - 未传入 `<files...>` 时仅更新 README 文末“文档摘要索引”，不修改任何 `docs/` 内容。
   - 传入 `<files...>` 时，仅对这些文件执行样式规范、许可页脚与编码修复等改动；随后更新 README 索引。
 
+### 受保护文档与命名冻结（新增）
+
+- 受保护清单（禁止自动重命名；仅在“明确路径 + 明确指令”下方可改动文件名）：
+  - `docs/1762876801_character_rl_sac_pacer_haca_v2 项目的著作权设计策略：“渊源”锁定与“双轨制”架构.md`
+- 执行与脚本约束：
+  - `scripts/ensure_docs_style_from_date.py`：默认跳过上述受保护文档的“重命名”步骤；仅在显式传入该文件路径且加开关 `--allow-protected-rename` 时方可重命名。
+  - `scripts/rename_docs_to_git_ts.py`：无论是否传入开关，均永久跳过受保护文档的重命名（仅对非受保护文档生效）。
+  - 其他脚本不得以任何方式隐式改动受保护文档的文件名。
+- 配置来源：`scripts/docs_processing_config.json` 的 `protected_docs_no_rename` 维护受保护文档路径清单；如需调整，需在 PR 中显式修改该配置并说明理由。
+
 ## 文档对齐范围与时间戳策略（扩展）
 
 - 顶层目录（不递归）统一纳入对齐：

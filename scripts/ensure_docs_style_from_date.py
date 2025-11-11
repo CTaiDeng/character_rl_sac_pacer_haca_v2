@@ -35,6 +35,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+import json
 from datetime import datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
@@ -48,6 +49,30 @@ from _doc_edit_guard import require_explicit_doc_paths
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = ROOT / 'scripts' / 'docs_processing_config.json'
+
+def _load_config() -> dict:
+    try:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _normalized(p: Path) -> str:
+    try:
+        return str(p.resolve()).replace('\\', '/')
+    except Exception:
+        return str(p).replace('\\', '/')
+
+def _protected_no_rename_set() -> set:
+    cfg = _load_config()
+    items = cfg.get('protected_docs_no_rename', []) or []
+    s = set()
+    for it in items:
+        # store as absolute-normalized
+        ap = (ROOT / it).resolve() if not os.path.isabs(it) else Path(it)
+        s.add(_normalized(ap))
+    return s
 
 NAME_RE = re.compile(r'^(\d+)_([\s\S]+)\.md$', re.IGNORECASE)
 TITLE_RE = re.compile(r'^\s*#\s+(.+?)\s*$')
@@ -77,10 +102,9 @@ def read_text(path: Path) -> Tuple[str, str]:
 
 
 def write_text(path: Path, text: str) -> None:
-    # 写回为 UTF-8（无 BOM）+ CRLF
+    # 写回为 UTF-8（无 BOM）+ LF（遵循 2025-10-25 行尾统一规范）
     lf = to_lf(text)
-    crlf = lf.replace('\n', '\r\n')
-    path.write_text(crlf, encoding='utf-8', newline='')
+    path.write_text(lf, encoding='utf-8')
 
 
 def sanitize_title_for_filename(title: str) -> str:
@@ -285,12 +309,16 @@ def allocate_unique_ts(entries: List[DocInfo]) -> Dict[Path, int]:
     return assigned
 
 
-def plan_renames(dir_entries: List[DocInfo]) -> Dict[Path, Path]:
+def plan_renames(dir_entries: List[DocInfo], allow_protected_rename: bool = False) -> Dict[Path, Path]:
     if not dir_entries:
         return {}
     assigned = allocate_unique_ts(dir_entries)
+    protected = _protected_no_rename_set()
     mapping: Dict[Path, Path] = {}
     for e in dir_entries:
+        if not allow_protected_rename and _normalized(e.path) in protected:
+            print(f"[ensure_docs_style_from_date] skip rename (protected): {e.path}")
+            continue
         final_ts = assigned[e.path]
         safe_title = sanitize_title_for_filename(e.title)
         new_name = f'{final_ts}_{safe_title}.md'
@@ -341,7 +369,7 @@ def perform_renames(mapping: Dict[Path, Path]) -> int:
     return changed
 
 
-def process_files(files: List[Path]) -> Tuple[int, int]:
+def process_files(files: List[Path], allow_protected_rename: bool = False) -> Tuple[int, int]:
     infos: List[DocInfo] = []
     content_updates = 0
     for p in files:
@@ -351,7 +379,7 @@ def process_files(files: List[Path]) -> Tuple[int, int]:
         infos.append(info)
         if changed:
             content_updates += 1
-    mapping = plan_renames(infos)
+    mapping = plan_renames(infos, allow_protected_rename=allow_protected_rename)
     renamed = perform_renames(mapping)
     return content_updates, renamed
 
@@ -359,9 +387,10 @@ def process_files(files: List[Path]) -> Tuple[int, int]:
 def main() -> int:
     ap = argparse.ArgumentParser(description='根据文内日期规范化文首并重命名（需显式传入文件列表）')
     ap.add_argument('files', nargs='+', help='项目相对路径，如 docs/1234567890_标题.md')
+    ap.add_argument('--allow-protected-rename', action='store_true', help='允许重命名受保护文档（默认跳过）')
     args = ap.parse_args()
     files = require_explicit_doc_paths(args.files)
-    u, r = process_files(files)
+    u, r = process_files(files, allow_protected_rename=bool(args.allow_protected_rename))
     print(f'[ensure_docs_style_from_date] updated={u} renamed={r}')
     return 0
 

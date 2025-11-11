@@ -23,11 +23,14 @@ import os
 import re
 import sys
 from pathlib import Path
+import argparse
+import json
 from typing import Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = ROOT / 'scripts' / 'docs_processing_config.json'
 TARGET_DIRS = [
     ROOT / 'docs',
     ROOT / 'my_docs' / 'project_docs',
@@ -36,6 +39,27 @@ TARGET_DIRS = [
 
 NAME_RE = re.compile(r'^(\d+)_([\s\S]+)\.md$', re.IGNORECASE)
 
+def _load_config() -> dict:
+    try:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _normalized(p: Path) -> str:
+    try:
+        return str(p.resolve()).replace('\\', '/')
+    except Exception:
+        return str(p).replace('\\', '/')
+
+def _protected_no_rename_set() -> set:
+    cfg = _load_config()
+    items = cfg.get('protected_docs_no_rename', []) or []
+    s = set()
+    for it in items:
+        ap = (ROOT / it).resolve() if not os.path.isabs(it) else Path(it)
+        s.add(_normalized(ap))
+    return s
 
 def safe_print(*args):
     try:
@@ -66,7 +90,7 @@ def allocate_unique_ts(desired_ts: int, used: Set[int]) -> int:
     return ts
 
 
-def plan_new_paths(files: List[Path]) -> Dict[Path, Path]:
+def plan_new_paths(files: List[Path], allow_protected_rename: bool = False) -> Dict[Path, Path]:
     # 收集 (path, title, desired_ts)
     entries: List[Tuple[Path, str, int]] = []
     for p in files:
@@ -88,7 +112,12 @@ def plan_new_paths(files: List[Path]) -> Dict[Path, Path]:
 
     used_ts: Set[int] = set()
     mapping: Dict[Path, Path] = {}
+    protected = _protected_no_rename_set()
     for p, title, desired in entries:
+        if _normalized(p) in protected:
+            safe_print(f"[rename_docs_to_git_ts] skip rename (protected): {p.name}")
+            mapping[p] = p  # identity mapping
+            continue
         final_ts = allocate_unique_ts(desired, used_ts)
         new_name = f"{final_ts}_{title}.md"
         mapping[p] = p.with_name(new_name)
@@ -135,13 +164,16 @@ def perform_renames(mapping: Dict[Path, Path]) -> Tuple[int, int]:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description='重写 docs 顶层文件的时间戳前缀（受保护文档默认不重命名）')
+    ap.add_argument('--allow-protected-rename', action='store_true', help='允许重命名受保护文档（需显式开启）')
+    args = ap.parse_args()
     total_changed = 0
     total_skipped = 0
     for d in TARGET_DIRS:
         if not (d.exists() and d.is_dir()):
             continue
         files = sorted([p for p in d.iterdir() if p.is_file() and p.suffix.lower() == '.md'])
-        mapping = plan_new_paths(files)
+        mapping = plan_new_paths(files, allow_protected_rename=bool(args.allow_protected_rename))
         changed, skipped = perform_renames(mapping)
         total_changed += changed
         total_skipped += skipped
@@ -151,4 +183,3 @@ def main() -> int:
 
 if __name__ == '__main__':
     raise SystemExit(main())
-
