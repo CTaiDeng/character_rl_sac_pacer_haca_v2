@@ -262,6 +262,16 @@
 - 与文档许可的关系：代码采用 GPL-3.0-only 许可头部；`docs/` 目录内文档遵循 `docs/LICENSE.md` 所述的 CC BY-NC-ND 4.0 许可，二者相互独立、互不干扰。
 - 版本与变更：若年份或作者变更，需同步更新本条款与脚本参数，并在必要时批量重写头部。
 
+## GPL 检查与臂长边界脚本（新增）
+
+- 工具脚本：仓根 `check_gpl_and_arms_length.py`。
+  - 默认范围：`--scope repo`（全仓），基于 Git 枚举“已跟踪 + 未被忽略的未跟踪”的 `.py` 文件，严格尊重 `.gitignore`；
+  - 可选范围：`--scope src`，仅扫描 `src/`，并开启“臂长通信”校验：禁止从 `src/` 直接 `import data/scripts/tests`，以及向这些目录进行 `sys.path` 注入；
+  - 退出码契约：`--fail-on-gpl` 触发时为 `2`，`--fail-on-armlength`（仅 `--scope src`）触发时为 `3`，二者同时触发时以脚本实现为准；
+  - 只读检查，不修改仓库内容。
+- CI 建议：至少在主分支保护或发布前执行 `python3 check_gpl_and_arms_length.py --json --fail-on-gpl`；如需校验臂长边界，可在源码型工作流中追加 `--scope src --fail-on-armlength`。
+- 文档同步（强制）：该脚本的使用说明需在 `scripts/README.md` 顶部以“最高优先级”呈现，并与脚本实现保持同步维护。凡涉及 CLI 选项、默认范围、退出码或输出结构的变更，必须在同一变更中同步更新 `scripts/README.md` 对应段落。
+
 ## 规则修订（2025-10-14）
 
 - 版本控制：`docs/kernel_reference/` 目录纳入版本控制，不再加入 `.gitignore` 忽略。

@@ -4,6 +4,28 @@
 
 ---
 
+## 重要：check_gpl_and_arms_length.py（许可证检查与“臂长”边界）
+
+- 作用：
+  - 全仓默认检查未被 `.gitignore` 忽略的全部 Python 文件（.py），统计顶层导入并基于本机包元数据识别第三方分发包的许可证，显式标注 GPL/AGPL/LGPL 家族依赖；
+  - 可选在 `--scope src` 下启用“臂长通信”规则：禁止 `src/` 以库方式直接 `import data/scripts/tests`，并检测针对这些目录的 `sys.path` 注入。
+- 检查范围：
+  - 默认 `--scope repo`（全仓），使用 `git ls-files` 与 `git ls-files -o --exclude-standard`，覆盖“已跟踪 + 未被忽略的未跟踪” `.py`，严格尊重 `.gitignore`；
+  - `--scope src` 时仅扫描 `src/`。
+- 退出码（用于 CI）：
+  - 正常：`0`；
+  - 发现 GPL 家族依赖且启用 `--fail-on-gpl`：`2`；
+  - 发现臂长违规且启用 `--fail-on-armlength`（仅 `--scope src` 有效）：`3`；
+  - 同时触发时保留最严重的非零码（以脚本实现为准）。
+- 最小用法：
+  - 全仓文本报告：`python3 check_gpl_and_arms_length.py`
+  - JSON 输出：`python3 check_gpl_and_arms_length.py --json`
+  - 仅源码并启用臂长规则：`python3 check_gpl_and_arms_length.py --scope src --fail-on-armlength`
+  - CI 严格模式：`python3 check_gpl_and_arms_length.py --json --fail-on-gpl`
+- 维护约定：该段说明与脚本实现保持同步维护；当脚本的 CLI 选项、默认范围、退出码或输出结构调整时，必须在本节同步更新。
+
+---
+
 ## 快速开始
 - 运行全量对齐流程：`python scripts/align_docs.py`
 - 启用预提交钩子：`git config core.hooksPath .githooks`
@@ -100,4 +122,3 @@
 ## 约定
 - 编码与行尾：统一 UTF-8（带 BOM）+ LF
 - 自动化：预提交钩子会规范化已暂存的 `.md` 并更新 README 摘要索引；详见 `AGENTS.md`
-
