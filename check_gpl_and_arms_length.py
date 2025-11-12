@@ -4,8 +4,8 @@
 
 """
 检查项：
-1) 全仓 Python 脚本是否使用了 GPL 家族许可证（GPL/AGPL/LGPL）的第三方 Python 包；
-2)（可选）校验 src 与 data/scripts/tests 之间是否保持“臂长通信”（禁止 src 作为库方式 import 这些目录下的模块，禁止通过 sys.path 注入路径联动）。
+1) 对“未被 .gitignore 忽略”的全部 Python 脚本（.py）进行排查，判断是否使用了 GPL 家族许可证（GPL/AGPL/LGPL）的第三方 Python 包；
+2)（可选，仅 --scope src）校验 src 与 data/scripts/tests 之间是否保持“臂长通信”（禁止 src 作为库方式 import 这些目录下的模块，禁止通过 sys.path 注入路径联动）。
 
 用法示例：
   - 文本报告（默认全仓）：
@@ -21,7 +21,7 @@
 
 说明：
 - 依赖探测基于静态 AST 提取 import 顶层模块名，并用 importlib.metadata 映射到安装分发包以读取许可证与版本。
-- 全仓模式会遍历仓内全部 .py（默认跳过 .git/.venv/out 等常见目录）。
+- 目标文件集合严格以 git 索引和 .gitignore 为准：通过 `git ls-files` + `git ls-files -o --exclude-standard` 枚举未被忽略的 .py 文件（包含已跟踪与未忽略的未跟踪）。
 - 该脚本为只读检查，不修改仓库内容。
 """
 
@@ -56,22 +56,36 @@ TESTS_DIR = ROOT / "tests"
 EXCLUDE_DIR_NAMES = {".git", ".venv", "__pycache__", "out"}
 
 
-def _git_ls_py_files(root: Path) -> List[Path]:
-    """使用 git 列出受 .gitignore 约束的 .py 文件（包含已跟踪 + 未忽略的未跟踪）。"""
+def _git_ls_py_files(root: Path, subdir: Optional[Path] = None) -> List[Path]:
+    """使用 git（尊重 .gitignore）列出 .py 文件（包含已跟踪 + 未忽略的未跟踪）。
+
+    当 subdir 提供时，仅在该子目录范围内枚举。
+    """
     import subprocess
     files: List[Path] = []
+    # 计算 pathspec
+    pathspec: List[str] = []
+    if subdir is not None:
+        try:
+            rel = os.path.relpath(subdir, root)
+        except Exception:
+            rel = str(subdir)
+        # 使用 "-- <path>" 限定范围，再在 Python 侧过滤 .py 后缀，避免依赖特性通配
+        pathspec = ["--", rel]
     try:
-        tracked = subprocess.check_output(["git", "ls-files", "*.py"], cwd=str(root)).decode("utf-8", errors="ignore").splitlines()
+        tracked_args = ["git", "ls-files"] + pathspec
+        tracked = subprocess.check_output(tracked_args, cwd=str(root)).decode("utf-8", errors="ignore").splitlines()
     except Exception:
         tracked = []
     try:
-        untracked = subprocess.check_output(["git", "ls-files", "-o", "--exclude-standard", "*.py"], cwd=str(root)).decode("utf-8", errors="ignore").splitlines()
+        untracked_args = ["git", "ls-files", "-o", "--exclude-standard"] + pathspec
+        untracked = subprocess.check_output(untracked_args, cwd=str(root)).decode("utf-8", errors="ignore").splitlines()
     except Exception:
         untracked = []
     seen: Set[str] = set()
     for rel in tracked + untracked:
         rel = rel.strip()
-        if not rel:
+        if not rel or not rel.endswith(".py"):
             continue
         if rel in seen:
             continue
@@ -83,14 +97,26 @@ def _git_ls_py_files(root: Path) -> List[Path]:
 
 
 def list_py_files(d: Path, recursive: bool = True) -> List[Path]:
-    """优先使用 git 结果；git 不可用时回退到 os.walk（带粗略目录排除）。"""
+    """基于 git（.gitignore）列出 .py 文件；git 不可用时回退到 os.walk（粗略排除目录）。
+
+    - 当 d 位于仓库根内时，使用 `git ls-files` + 未忽略未跟踪模式限定子树范围；
+    - 否则仅回退扫描。
+    """
     if not d.exists():
         return []
-    # 若扫描根目录，优先 git
-    if d.resolve() == ROOT.resolve():
-        files = _git_ls_py_files(ROOT)
-        return files
-    # 子目录：git 仍可用，但简化为回退扫描（已由 --scope 控制范围）
+    try:
+        # d 在仓库根内：统一走 git（尊重 .gitignore）
+        d_res = d.resolve()
+        root_res = ROOT.resolve()
+        if d_res == root_res:
+            return _git_ls_py_files(ROOT, None)
+        # d 若为根子目录（例如 src/），仍使用 git 并限定范围
+        if str(d_res).startswith(str(root_res)):
+            return _git_ls_py_files(ROOT, d)
+    except Exception:
+        pass
+
+    # 回退扫描（git 不可用）
     if not recursive:
         return [p for p in d.glob("*.py") if p.is_file()]
     out: List[Path] = []
@@ -434,38 +460,38 @@ def main() -> int:
             "c": "\033[36m",
             "reset": "\033[0m",
         }
-        # 1) GPL usage check
-        print(f"{C['b']}{C['c']}[lbopb GPL usage check]{C['reset']}")
-        print(f" {C['c']}-{C['reset']} scanned files: {scanned_files}")
-        print(f" {C['c']}-{C['reset']} unique imports: {unique_imports}")
+        # 1) 第三方许可证检查（本项目样式）
+        print(f"{C['b']}{C['c']}[第三方许可证检查]{C['reset']}")
+        print(f" {C['c']}-{C['reset']} 扫描脚本数: {scanned_files}")
+        print(f" {C['c']}-{C['reset']} 唯一导入模块数: {unique_imports}")
         if gpl_uses:
-            print(f" {C['c']}-{C['reset']} GPL packages:")
+            print(f" {C['c']}-{C['reset']} GPL 家族依赖：")
             for g in gpl_uses:
-                print(f"   {C['r']}!{C['reset']} {g['distribution']}=={g['version']} via import {g['module']} | {g['license_family']} ({g['license_raw']})")
+                print(f"   {C['r']}!{C['reset']} 分发 {g['distribution']}=={g['version']}（通过 import {g['module']}）| 许可证 {g['license_family']}（{g['license_raw']}）")
         else:
-            print(f" {C['c']}-{C['reset']} GPL packages: none detected (based on local metadata)")
+            print(f" {C['c']}-{C['reset']} GPL 家族依赖：未发现（基于本地包元数据）")
 
-        # 2) Host boundary check（仅在 src 场景严格；repo 场景提供概览）
-        print(f"{C['b']}{C['c']}[host boundary check]{C['reset']}")
+        # 2) 臂长边界检查（仅在 src 场景严格；repo 场景提供概览）
+        print(f"{C['b']}{C['c']}[臂长边界检查]{C['reset']}")
         # 直接导入 data/scripts/tests
         if args.scope == "src":
             direct_imports = [v for v in violations if v.kind == "import"]
             if not direct_imports:
-                print(f" {C['c']}-{C['reset']} No direct imports of data/scripts/tests detected")
+                print(f" {C['c']}-{C['reset']} 未发现对 data/scripts/tests 的直接导入")
             else:
-                print(f" {C['y']}-{C['reset']} Direct imports detected:")
+                print(f" {C['y']}-{C['reset']} 发现直接导入：")
                 for v in direct_imports:
                     print(f"   {C['y']}+{C['reset']} {v.file}:{v.line} → {v.detail}")
             path_hacks = [v for v in violations if v.kind == "path_hack"]
             if path_hacks:
-                print(f" {C['y']}-{C['reset']} sys.path manipulations toward data/scripts/tests:")
+                print(f" {C['y']}-{C['reset']} 检测到朝向 data/scripts/tests 的 sys.path 操作：")
                 for v in path_hacks:
                     print(f"   {C['y']}+{C['reset']} {v.file}:{v.line} → {v.detail}")
         else:
-            print(f" {C['c']}-{C['reset']} Scope=repo; arm's length rules apply in --scope src only")
+            print(f" {C['c']}-{C['reset']} 范围=repo；臂长规则仅在 --scope src 生效")
 
         # 3) 证据：CLI 使用（子进程）
-        print(f" {C['c']}-{C['reset']} Evidence of CLI usage (arm's length):")
+        print(f" {C['c']}-{C['reset']} CLI 使用证据（臂长侧）：")
         # 简易扫描：grep 典型子进程调用与脚本入口使用痕迹
         evidences: List[str] = []
         try:
@@ -496,21 +522,21 @@ def main() -> int:
             for ev in evidences[:10]:
                 print(f"   {C['g']}+{C['reset']} {ev}")
             if len(evidences) > 10:
-                print(f"   {C['g']}+{C['reset']} ... {len(evidences)-10} more")
+                print(f"   {C['g']}+{C['reset']} ... 另有 {len(evidences)-10} 条")
         else:
-            print(f"   {C['g']}+{C['reset']} no obvious CLI/subprocess evidence found")
+            print(f"   {C['g']}+{C['reset']} 未发现明显的 CLI/子进程使用线索")
 
         ok_gpl = (len(gpl_uses) == 0)
         ok_boundary = (args.scope != "src") or (len(violations) == 0)
         if ok_gpl and ok_boundary:
-            print(f"{C['g']}[OK]{C['reset']} lbopb 未发现 GPL 依赖且与宿主保持臂长通信（基于当前环境可用的元数据与静态扫描）")
+            print(f"{C['g']}[OK]{C['reset']} 未发现 GPL 家族依赖；与宿主保持臂长通信（基于当前环境可用的元数据与静态扫描）")
         else:
             if not ok_gpl and ok_boundary:
                 print(f"{C['y']}[WARN]{C['reset']} 发现 GPL 家族依赖，请评估兼容性与许可证义务")
             elif ok_gpl and not ok_boundary:
-                print(f"{C['y']}{{WARN}}{C['reset']} 发现与宿主边界的直连或路径注入，请改为 CLI/文件 I/O")
+                print(f"{C['y']}[WARN]{C['reset']} 发现与宿主边界的直连或路径注入，请改为 CLI/文件 I/O")
             else:
-                print(f"{C['r']}[FAIL]{C['reset']} 同时存在 GPL 依赖与臂长边界问题，请立即整改")
+                print(f"{C['r']}[FAIL]{C['reset']} 同时存在 GPL 家族依赖与臂长边界问题，请立即整改")
 
     exit_code = 0
     if args.fail_on_gpl and gpl_uses:
