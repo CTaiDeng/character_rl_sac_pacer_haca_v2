@@ -1,3 +1,18 @@
+> [!IMPORTANT]
+> ## **本项目已不再维护**
+>
+> **本仓库仅作为历史公开版本留存；后续工作已被下述 Zenodo 存证条目所锚定、并持续迭代升级的替代方案取代。**
+>
+> ### **私有仓库快照的密码学防伪承诺 (001)**
+>
+> [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21340913.svg)](https://doi.org/10.5281/zenodo.21340913)
+>
+> #### **Citation**
+>
+> ##### **Gao, Z. (2026). 私有仓库快照的密码学防伪承诺(Cryptographic Proof Commitment for Private Repository Snapshot) (Version v2.0). Zenodo. https://doi.org/10.5281/zenodo.21340913**
+
+---
+
 沟通（面向编程助手）：本仓库默认使用中文（简体）进行交流与答复；如需英文，将在指令中显式注明。
 
 # 项目说明
