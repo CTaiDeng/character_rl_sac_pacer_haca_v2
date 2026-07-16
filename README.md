@@ -7,9 +7,9 @@
 >
 > [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21340913.svg)](https://doi.org/10.5281/zenodo.21340913)
 >
-> #### **Citation**
+> ### **Citation**
 >
-> ##### **Gao, Z. (2026). 私有仓库快照的密码学防伪承诺(Cryptographic Proof Commitment for Private Repository Snapshot) (Version v2.0). Zenodo. https://doi.org/10.5281/zenodo.21340913**
+> #### **Gao, Z. (2026). 私有仓库快照的密码学防伪承诺(Cryptographic Proof Commitment for Private Repository Snapshot) (Version v2.0). Zenodo. https://doi.org/10.5281/zenodo.21340913**
 
 ---
 
